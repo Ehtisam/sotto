@@ -48,6 +48,14 @@ func (e *Entity) Name() string {
 	return e.Decorations.Identity.Name
 }
 
+// URIOrEmpty, öğe yoksa "" döner.
+func (e *Entity) URIOrEmpty() string {
+	if e == nil {
+		return ""
+	}
+	return e.URI
+}
+
 // Creators, sanatçı ya da yayıncı adlarını virgülle birleştirir.
 func (e *Entity) Creators() string {
 	if e == nil {

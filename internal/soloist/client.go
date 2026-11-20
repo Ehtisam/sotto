@@ -22,7 +22,7 @@ type Client struct {
 func Dial(ctx context.Context, addr string) (*Client, error) {
 	conn, _, err := websocket.Dial(ctx, "ws://"+addr, nil)
 	if err != nil {
-		return nil, fmt.Errorf("soloist'e bağlanılamadı: %w", err)
+		return nil, fmt.Errorf("could not connect to soloist: %w", err)
 	}
 	conn.SetReadLimit(4 << 20)
 	rctx, cancel := context.WithCancel(context.Background())

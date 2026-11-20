@@ -8,15 +8,18 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Ehtisam/sotto/internal/config"
+	"github.com/Ehtisam/sotto/internal/i18n"
 	"github.com/Ehtisam/sotto/internal/ui"
 )
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sotto: ayarlar okunamadı:", err)
+		fmt.Fprintln(os.Stderr, "sotto: could not read settings:", err)
 		os.Exit(1)
 	}
+
+	i18n.Set(cfg.Language)
 
 	m := ui.New(cfg)
 	// Soloist sotto açıkken çalışır; nasıl çıkılırsa çıkılsın kapatılır.

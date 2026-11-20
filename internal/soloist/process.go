@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,11 +17,14 @@ const exitExpired = 10
 
 var (
 	// ErrNotInstalled: soloist çalıştırılabilir dosyası yok.
-	ErrNotInstalled = errors.New("soloist bulunamadı")
+	ErrNotInstalled = errors.New("soloist not found")
 	// ErrNoAPIKey: Soloist API anahtarı yok.
-	ErrNoAPIKey = errors.New("soloist api anahtarı yok")
+	ErrNoAPIKey = errors.New("no soloist api key")
 	// ErrExpired: kurulu Soloist sürümünün 90 günlük ömrü dolmuş.
-	ErrExpired = errors.New("soloist sürümünün süresi dolmuş")
+	ErrExpired = errors.New("soloist build has expired")
+	// ErrAlreadyRunning: aynı veri klasörüyle başka bir Soloist çalışıyor
+	// ve sotto ona bağlanamadı.
+	ErrAlreadyRunning = errors.New("another soloist session is running")
 )
 
 // Options, Soloist'i başlatmak için gerekenler.
@@ -34,7 +38,7 @@ type Options struct {
 	InitialVolume int
 }
 
-// Process, sotto'nun başlattığı bir Soloist süreci.
+// Process, sotto'nun başlattığı ya da zaten çalışıp bağlandığı bir Soloist.
 type Process struct {
 	cmd     *exec.Cmd
 	logFile *os.File
@@ -43,6 +47,28 @@ type Process struct {
 
 	// Addr, WebSocket API'nin adresi (127.0.0.1:port).
 	Addr string
+	// Attached: Soloist'i başka biri (ör. başka bir sotto penceresi)
+	// başlatmış; bu sotto kapanınca onu kapatmaz.
+	Attached bool
+}
+
+// running, veri klasöründe çalışan bir Soloist'in API adresini bulur.
+func running(dataDir string) (string, bool) {
+	port, err := os.ReadFile(filepath.Join(dataDir, "ws.port"))
+	if err != nil || strings.TrimSpace(string(port)) == "" {
+		return "", false
+	}
+	host := "127.0.0.1"
+	if b, err := os.ReadFile(filepath.Join(dataDir, "ws.addr")); err == nil && strings.TrimSpace(string(b)) != "" {
+		host = strings.TrimSpace(string(b))
+	}
+	addr := net.JoinHostPort(host, strings.TrimSpace(string(port)))
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err != nil {
+		return "", false
+	}
+	conn.Close()
+	return addr, true
 }
 
 // Start, Soloist'i WebSocket API'si açık olarak başlatır ve API hazır olana
@@ -57,6 +83,10 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 	}
 	if strings.TrimSpace(o.APIKey) == "" {
 		return nil, ErrNoAPIKey
+	}
+	// Soloist zaten çalışıyorsa (ör. başka bir sotto penceresi) ona bağlan.
+	if addr, ok := running(o.DataDir); ok {
+		return &Process{Addr: addr, Attached: true, done: make(chan struct{})}, nil
 	}
 	for _, d := range []string{o.DataDir, o.CacheDir, filepath.Dir(o.LogPath)} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
@@ -88,7 +118,7 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 	detach(cmd)
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
-		return nil, fmt.Errorf("soloist başlatılamadı: %w", err)
+		return nil, fmt.Errorf("could not start soloist: %w", err)
 	}
 
 	_ = bindToParent(cmd.Process.Pid) // olmazsa da sotto kapanırken Stop ile kapatılır
@@ -103,10 +133,13 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 	addr, err := waitForAddr(ctx, o.DataDir, p.done)
 	if err != nil {
 		p.Stop()
+		if log, _ := os.ReadFile(o.LogPath); strings.Contains(string(log), "another session is running") {
+			return nil, ErrAlreadyRunning
+		}
 		if code := p.ExitCode(); code == exitExpired {
 			return nil, ErrExpired
 		} else if code > 0 {
-			return nil, fmt.Errorf("soloist kapandı (çıkış kodu %d), ayrıntı: %s", code, o.LogPath)
+			return nil, fmt.Errorf("soloist exited with code %d (see %s)", code, o.LogPath)
 		}
 		return nil, err
 	}
@@ -131,9 +164,9 @@ func waitForAddr(ctx context.Context, dataDir string, done <-chan struct{}) (str
 		}
 		select {
 		case <-done:
-			return "", errors.New("soloist hemen kapandı")
+			return "", errors.New("soloist exited right away")
 		case <-ctx.Done():
-			return "", errors.New("soloist'in API'si açılmadı (15 sn)")
+			return "", errors.New("soloist api did not open within 15s")
 		case <-tick.C:
 		}
 	}
@@ -149,7 +182,7 @@ func (p *Process) ExitCode() int {
 	default:
 		return -1
 	}
-	if p.cmd.ProcessState == nil {
+	if p.cmd == nil || p.cmd.ProcessState == nil {
 		return -1
 	}
 	return p.cmd.ProcessState.ExitCode()
@@ -157,7 +190,7 @@ func (p *Process) ExitCode() int {
 
 // Stop, Soloist'i kapatır ve bitmesini bekler.
 func (p *Process) Stop() {
-	if p == nil || p.cmd.Process == nil {
+	if p == nil || p.Attached || p.cmd == nil || p.cmd.Process == nil {
 		return
 	}
 	select {

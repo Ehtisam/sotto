@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Ehtisam/sotto/internal/i18n"
 	"github.com/Ehtisam/sotto/internal/soloist"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
 )
@@ -19,6 +20,8 @@ const (
 	gutter    = 3  // sütunlar arası boşluk
 	margin    = 1  // sol kenar boşluğu
 )
+
+var T, F = i18n.T, i18n.F
 
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
@@ -30,11 +33,12 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) windowTitle() string {
-	if n := m.state.Item.Name(); n != "" {
-		if a := m.state.Item.Creators(); a != "" {
-			return n + " — " + a + " · sotto"
-		}
-		return n + " · sotto"
+	name, artists, _ := m.describe(m.state.Item)
+	switch {
+	case name != "" && artists != "":
+		return name + " — " + artists + " · sotto"
+	case name != "":
+		return name + " · sotto"
 	}
 	return "sotto"
 }
@@ -49,7 +53,7 @@ func (m Model) render() string {
 	// Sabit satırlar: başlık, çizgi, çizgi, şerit (2), boş, kısayollar.
 	bodyH := max(h-7, 1)
 
-	lines := []string{
+	return strings.Join([]string{
 		m.header(w),
 		rule,
 		m.body(w, bodyH),
@@ -57,41 +61,48 @@ func (m Model) render() string {
 		m.strip(w),
 		"",
 		m.hints(w),
-	}
-	return strings.Join(lines, "\n")
+	}, "\n")
 }
 
 // ---- başlık ----
 
 func (m Model) header(w int) string {
-	left := strings.Repeat(" ", margin) + theme.Brand.Render("sotto") + theme.Faint.Render("  ·  ") + theme.Dim.Render("alçak sesle")
-	right := m.deviceStatus() + " "
-	return spread(left, right, w)
+	left := strings.Repeat(" ", margin) + theme.Brand.Render("sotto") + theme.Faint.Render("  ·  ")
+	if m.me.DisplayName != "" {
+		left += theme.Dim.Render(m.me.DisplayName)
+	} else {
+		left += theme.Dim.Render(T("tagline"))
+	}
+	return spread(left, m.deviceStatus()+" ", w)
 }
 
 func (m Model) deviceStatus() string {
+	// Kumanda: başka bir cihazda çalıyor.
+	if m.remote.active && m.remote.device != "" {
+		return theme.GoldText.Render("♪ ") + theme.Plain.Render(m.remote.device) + theme.Dim.Render(T("dev.remote"))
+	}
 	switch m.engine {
 	case engineOff:
-		return theme.Dim.Render("hoparlör kapalı")
+		return theme.Dim.Render(T("dev.off"))
 	case engineStarting:
-		return theme.Dim.Render("Soloist başlatılıyor…")
+		return theme.Dim.Render(T("dev.starting"))
 	case engineFailed:
-		return theme.Error.Render("Soloist kapalı")
+		return theme.Error.Render(T("dev.failed"))
 	}
 	if !m.haveAuth {
-		return theme.Dim.Render("bağlanıyor…")
+		return theme.Dim.Render(T("dev.connect"))
 	}
 	if !m.auth.LoggedIn {
-		return theme.Dim.Render("eşleşme bekleniyor")
+		return theme.Dim.Render(T("dev.pairing"))
 	}
 	name := m.auth.DeviceName
 	if name == "" {
 		name = "sotto"
 	}
 	if m.auth.IsActive {
-		return theme.GoldText.Render("♪ ") + theme.Plain.Render(name) + theme.Dim.Render(" · hafif mod")
+		return theme.GoldText.Render("♪ ") + theme.Plain.Render(name) + theme.Dim.Render(T("dev.light"))
 	}
-	return theme.Dim.Render(name + " · etkin değil")
+	return theme.Dim.Render(name + T("dev.inactive"))
 }
 
 // ---- gövde ----
@@ -113,29 +124,51 @@ func (m Model) body(w, h int) string {
 }
 
 func (m Model) menu(h int) string {
-	rows := []string{theme.Dim.Italic(true).Render("içindekiler"), ""}
+	rows := []string{theme.Dim.Italic(true).Render(T("contents")), ""}
 	for i, p := range pages {
-		label := fmt.Sprintf(" %-5s%s", p.numeral, p.name)
-		if page(i) == m.page {
+		name := T(p.name)
+		label := fmt.Sprintf(" %-5s%s", p.numeral, name)
+		switch {
+		case page(i) == m.page && m.focus == focusMenu:
 			rows = append(rows, theme.SelectedRow.Width(menuWidth).Render(label))
-			continue
+		case page(i) == m.page:
+			rows = append(rows, theme.Hi.Render(label))
+		default:
+			rows = append(rows, theme.Dim.Render(fmt.Sprintf(" %-5s", p.numeral))+theme.Plain.Render(name))
 		}
-		rows = append(rows, theme.Dim.Render(fmt.Sprintf(" %-5s", p.numeral))+theme.Plain.Render(p.name))
+	}
+	// Çalan şarkının kapağı menünün altında; Şimdi çalıyor sayfasında zaten büyüğü var.
+	const cw, ch = menuWidth - 2, (menuWidth - 2) / 2
+	if url := m.nowCoverURL(); url != "" && m.page != pageNow && !m.help && h >= len(rows)+ch+3 {
+		rows = append(rows, "")
+		for _, l := range strings.Split(m.coverBox(url, cw, ch), "\n") {
+			rows = append(rows, " "+l)
+		}
+		if _, _, album := m.describe(m.state.Item); album != "" {
+			rows = append(rows, " "+theme.Dim.Italic(true).Render(truncate(album, cw)))
+		}
 	}
 	return lipgloss.NewStyle().Width(menuWidth).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
 }
 
 func (m Model) content(w, h int) string {
 	var rows []string
-	if m.page == pageNow {
+	switch {
+	case m.help:
+		rows = m.helpView(w)
+	case m.page == pageNow:
 		rows = m.nowPlaying(w, h)
-	} else {
+	case m.page == pageLibrary:
+		rows = m.libraryView(w, h)
+	case m.page == pageDevices:
+		rows = m.devicesView(w)
+	default:
 		p := pages[m.page]
 		rows = []string{
-			theme.Title.Render(p.name),
+			theme.Title.Render(T(p.name)),
 			"",
-			theme.Dim.Render("Bu sayfa henüz yazılmadı."),
-			theme.Faint.Render("gelecek: ") + theme.Dim.Render(p.soon),
+			theme.Dim.Render(T("page.unwritten")),
+			theme.Faint.Render(T("page.coming")) + theme.Dim.Render(T(p.soon)),
 		}
 	}
 	for i, r := range rows {
@@ -144,64 +177,89 @@ func (m Model) content(w, h int) string {
 	return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
 }
 
-// nowPlaying, I · Şimdi çalıyor sayfası.
+// nowPlaying, I · Şimdi çalıyor sayfası: solda büyük kapak, yanında şarkı
+// bilgisi ve sıradakiler.
 func (m Model) nowPlaying(w, h int) []string {
-	rows := []string{theme.Title.Render("Şimdi çalıyor")}
-	if msg := m.engineMessage(); len(msg) > 0 {
-		return append(append(rows, ""), msg...)
-	}
+	head := []string{theme.Title.Render(T("page.now")), ""}
 
-	it := m.state.Item
-	if it == nil || it.Name() == "" {
-		return append(rows, "",
-			theme.Dim.Render("Çalan bir şey yok."),
-			theme.Faint.Render("Telefondan ya da Spotify'dan bir şey başlat, ya da ")+theme.Dim.Render("boşluk")+theme.Faint.Render(" ile kaldığın yerden devam et."),
+	name, _, _ := m.describe(m.state.Item)
+	if name == "" {
+		if msg := m.engineMessage(); len(msg) > 0 && !m.remote.active {
+			return append(head, msg...)
+		}
+		return append(head,
+			theme.Dim.Render(T("now.nothing")),
+			theme.Faint.Render(T("now.nothing.how")),
 		)
 	}
 
+	// Kapak kare: satırın iki katı sütun. Bilgiye en az 32 sütun bırak.
+	ch := min(h-2, 16)
+	cw := ch * 2
+	if w-cw-3 < 32 {
+		cw = max(w-3-32, 0)
+		ch = cw / 2
+		cw = ch * 2
+	}
+	url := m.nowCoverURL()
+	if ch < 5 || url == "" {
+		return append(head, m.nowInfo(w, h-2)...)
+	}
+	info := m.nowInfo(w-cw-3, h-2)
+	block := lipgloss.JoinHorizontal(lipgloss.Top, m.coverBox(url, cw, ch), "   ", strings.Join(info, "\n"))
+	return append(head, strings.Split(block, "\n")...)
+}
+
+// nowInfo, şarkı bilgisi ve sıradakiler (w genişliğinde, en çok h satır).
+func (m Model) nowInfo(w, h int) []string {
+	name, artists, album := m.describe(m.state.Item)
+	var rows []string
 	if ctx := m.state.Context; ctx != nil && ctx.Name() != "" {
-		rows = append(rows, theme.Dim.Render(ctx.Name())+theme.Faint.Render(" · "+entityKind(ctx.EntityType)))
+		rows = append(rows, theme.Dim.Render(truncate(ctx.Name(), w-20))+theme.Faint.Render(" · "+entityKind(ctx.EntityType)))
 	} else {
 		rows = append(rows, "")
 	}
 	rows = append(rows, "")
 
-	title := theme.Hi.Bold(true).Render(it.Name())
-	if it.Explicit() {
+	title := theme.Hi.Bold(true).Render(truncate(name, w-3))
+	if m.state.Item.Explicit() {
 		title += theme.Faint.Render("  E")
 	}
 	rows = append(rows, title)
-	if a := it.Creators(); a != "" {
-		rows = append(rows, theme.Plain.Render(a))
+	if artists != "" {
+		rows = append(rows, theme.Plain.Render(truncate(artists, w)))
 	}
-	if p := it.ParentName(); p != "" {
-		rows = append(rows, theme.Dim.Render(p))
-	}
-
-	if !m.auth.IsActive {
-		rows = append(rows, "", theme.Dim.Render("sotto şu an etkin cihaz değil; ")+theme.Plain.Render("a")+theme.Dim.Render(" ile buraya al."))
+	if album != "" {
+		rows = append(rows, theme.Dim.Render(truncate(album, w)))
 	}
 
-	// Sıradakiler. Soloist bazı girişleri adsız gönderiyor; adlar ileride
-	// Web API'den tamamlanacak, şimdilik adı olanlar gösteriliyor.
-	var named []soloist.QueueEntry
-	for _, q := range m.queue.Upcoming {
-		if q.Item.Name() != "" {
-			named = append(named, q)
-		}
+	switch {
+	case m.remote.active:
+		rows = append(rows, "", theme.Faint.Render(truncate(F("now.remote", m.remote.device), w)))
+	case m.soloistLive() && !m.auth.IsActive:
+		rows = append(rows, "", theme.Dim.Render(truncate(T("now.inactive"), w)))
 	}
+
+	// Sıradakiler.
 	if len(m.queue.Upcoming) > 0 && h-len(rows) > 4 {
-		rows = append(rows, "", theme.Dim.Italic(true).Render("sıradakiler"))
+		rows = append(rows, "", theme.Dim.Italic(true).Render(T("now.upnext")))
 		room := h - len(rows)
-		for i, q := range named {
-			if i >= room-1 {
-				break
+		shown, unnamed := 0, 0
+		for _, q := range m.queue.Upcoming {
+			qn, qa, _ := m.describe(q.Item)
+			if qn == "" {
+				unnamed++
+				continue
 			}
-			num := theme.Faint.Render(fmt.Sprintf("%2d  ", i+1))
-			rows = append(rows, num+leader(q.Item.Name(), q.Item.Creators(), w-4, theme.Plain, theme.Dim))
+			if shown >= room-1 {
+				continue
+			}
+			shown++
+			num := theme.Faint.Render(fmt.Sprintf("%2d  ", shown))
+			rows = append(rows, num+row(qn, qa, w-4, false))
 		}
-		if rest := len(m.queue.Upcoming) - len(named); rest > 0 {
-			rows = append(rows, theme.Faint.Render(fmt.Sprintf("    ve %d şarkı daha", rest)))
+		if unnamed > 0 {
+			rows = append(rows, theme.Faint.Render(F("now.more", unnamed)))
 		}
 	}
 	return rows
@@ -211,48 +269,57 @@ func (m Model) nowPlaying(w, h int) []string {
 func (m Model) engineMessage() []string {
 	switch m.engine {
 	case engineOff:
-		return []string{theme.Dim.Render("Hafif mod kapalı.")}
+		return []string{theme.Dim.Render(T("eng.off")), theme.Faint.Render(T("eng.retry"))}
 	case engineStarting:
-		return []string{theme.Dim.Render("Soloist başlatılıyor…")}
+		return []string{theme.Dim.Render(T("eng.starting"))}
 	case engineFailed:
 		err := m.engineErr
+		var rows []string
 		switch {
 		case errors.Is(err, soloist.ErrNotInstalled):
-			return []string{
-				theme.Plain.Render("Soloist bulunamadı."),
-				theme.Faint.Render("Beklenen yer: ") + theme.Dim.Render(m.cfg.SoloistPath()),
-				theme.Faint.Render("İlk kurulum sihirbazı ileride bunu kendisi indirecek."),
+			rows = []string{
+				theme.Plain.Render(T("eng.notfound")),
+				theme.Faint.Render(T("eng.expected")) + theme.Dim.Render(m.cfg.SoloistPath()),
+				theme.Faint.Render(T("eng.wizard")),
 			}
 		case errors.Is(err, soloist.ErrNoAPIKey):
-			return []string{
-				theme.Plain.Render("Soloist anahtarı yok."),
-				theme.Faint.Render("Anahtarı şu dosyaya kaydet: ") + theme.Dim.Render(m.cfg.SoloistKeyFile()),
+			rows = []string{
+				theme.Plain.Render(T("eng.nokey")),
+				theme.Faint.Render(T("eng.savekey")) + theme.Dim.Render(m.cfg.ConfigFile()),
 			}
 		case errors.Is(err, soloist.ErrExpired):
-			return []string{
-				theme.Plain.Render("Soloist'in süresi dolmuş."),
-				theme.Faint.Render("Her sürüm 90 gün çalışıyor; yenisini indirmek gerekiyor."),
+			rows = []string{
+				theme.Plain.Render(T("eng.expired")),
+				theme.Faint.Render(T("eng.expired.how")),
 			}
+		case errors.Is(err, soloist.ErrAlreadyRunning):
+			return []string{
+				theme.Plain.Render(T("eng.busy")),
+				theme.Faint.Render(T("eng.busy.how")),
+			}
+		case errors.Is(err, errDisconnected):
+			rows = []string{theme.Plain.Render(T("eng.disconnected"))}
 		default:
-			msg := "bilinmeyen hata"
+			msg := T("eng.unknown")
 			if err != nil {
 				msg = err.Error()
 			}
-			return []string{
-				theme.Error.Render("Soloist çalışmıyor."),
+			rows = []string{
+				theme.Error.Render(T("eng.broken")),
 				theme.Dim.Render(msg),
-				theme.Faint.Render("Kayıt: ") + theme.Dim.Render(m.cfg.SoloistLog()),
+				theme.Faint.Render(T("eng.log")) + theme.Dim.Render(m.cfg.SoloistLog()),
 			}
 		}
+		return append(rows, "", theme.Faint.Render(T("eng.retry")))
 	}
 	if !m.haveAuth {
-		return []string{theme.Dim.Render("Soloist'e bağlanılıyor…")}
+		return []string{theme.Dim.Render(T("eng.connecting"))}
 	}
 	if !m.auth.LoggedIn {
 		return []string{
-			theme.Plain.Render("Eşleşme bekleniyor."),
-			theme.Dim.Render("Spotify uygulamasında ya da telefonda cihaz listesinden ") + theme.Hi.Render("sotto") + theme.Dim.Render("'yu seç."),
-			theme.Faint.Render("Bu bir kerelik; sonra sotto girişi hatırlar."),
+			theme.Plain.Render(T("eng.pair")),
+			theme.Dim.Render(T("eng.pair.how")),
+			theme.Faint.Render(T("eng.pair.once")),
 		}
 	}
 	return nil
@@ -276,18 +343,23 @@ func (m Model) strip(w int) string {
 		icon = theme.Faint.Render("·")
 	}
 
+	name, artists, _ := m.describe(it)
 	var line1 string
-	if it == nil || it.Name() == "" {
-		line1 = icon + "  " + theme.Faint.Render("çalan bir şey yok")
+	if name == "" {
+		line1 = icon + "  " + theme.Faint.Render(T("strip.nothing"))
 	} else {
-		line1 = icon + "  " + theme.Title.Render(it.Name())
-		if a := it.Creators(); a != "" {
-			line1 += theme.Dim.Render(" — " + a)
+		line1 = icon + "  " + theme.Title.Render(name)
+		if artists != "" {
+			line1 += theme.Dim.Render(" — " + artists)
 		}
 	}
 	right := ""
 	if m.flash != "" {
-		right = theme.Error.Render(m.flash)
+		style := theme.Error
+		if m.flashInfo {
+			style = theme.GoldText
+		}
+		right = style.Render(truncate(m.flash, inner*2/3))
 	} else if ctx := m.state.Context; ctx != nil && ctx.Name() != "" {
 		right = theme.Faint.Render(ctx.Name())
 	}
@@ -295,7 +367,7 @@ func (m Model) strip(w int) string {
 
 	// İlerleme çubuğu, süre, ses, karıştır, tekrar.
 	pos, dur := m.position(), it.Duration()
-	extras := theme.Faint.Render("   ses ") + theme.Plain.Render(fmt.Sprint(m.state.Volume)) + "  " + m.shuffleMark() + " " + m.repeatMark()
+	extras := theme.Faint.Render(T("strip.vol")) + theme.Plain.Render(fmt.Sprint(m.state.Volume)) + "  " + m.shuffleMark() + " " + m.repeatMark()
 	left := theme.Dim.Render(clock(pos)) + " "
 	rightTime := " " + theme.Dim.Render(clock(dur))
 	barW := inner - lipgloss.Width(left) - lipgloss.Width(rightTime) - lipgloss.Width(extras)
@@ -333,18 +405,67 @@ func bar(pos, dur time.Duration, w int) string {
 
 // ---- kısayollar ----
 
+// hints, en alttaki kısayol satırı. Önemli olanlardan başlayıp sığdığı
+// kadarını gösterir; tam liste her zaman ? ile açılır.
 func (m Model) hints(w int) string {
 	type hint struct{ key, verb string }
-	hs := []hint{
-		{"boşluk", "çal/durdur"}, {"n p", "sonraki/önceki"}, {"← →", "sar"}, {"+ −", "ses"},
-		{"s", "karıştır"}, {"r", "tekrar"}, {"↑ ↓", "sayfa"}, {"q", "çık"},
+	var hs []hint
+	if m.help {
+		hs = []hint{{"esc", T("hint.close")}}
+	} else if m.focus == focusContent {
+		hs = []hint{{"↑ ↓", T("hint.select")}, {"enter", T("hint.play")}, {"esc", T("hint.back")}}
+	} else {
+		hs = []hint{{"↑ ↓", T("hint.page")}}
+		if m.page.hasContent() {
+			hs = append(hs, hint{"enter", T("hint.enter")})
+		}
 	}
-	parts := make([]string, len(hs))
-	for i, h := range hs {
-		parts[i] = theme.Dim.Render(h.key) + " " + theme.Faint.Render(h.verb)
+	hs = append(hs,
+		hint{T("key.space"), T("hint.pause")}, hint{"n p", T("hint.skip")},
+		hint{"t", T("hint.switch")}, hint{"o", T("hint.solo")},
+		hint{", .", T("hint.seek")}, hint{"+ −", T("hint.vol")},
+		hint{"s", T("hint.shuf")}, hint{"r", T("hint.rep")}, hint{"q", T("hint.quit")},
+	)
+	render := func(h hint) string { return theme.Dim.Render(h.key) + " " + theme.Faint.Render(h.verb) }
+	sep := theme.Faint.Render(" · ")
+	tail := render(hint{"?", T("hint.keys")})
+	room := w - 2*margin - lipgloss.Width(tail) - lipgloss.Width(sep)
+	var parts []string
+	used := 0
+	for _, h := range hs {
+		p := render(h)
+		add := lipgloss.Width(p)
+		if len(parts) > 0 {
+			add += lipgloss.Width(sep)
+		}
+		if used+add > room {
+			break
+		}
+		parts, used = append(parts, p), used+add
 	}
-	line := strings.Repeat(" ", margin) + strings.Join(parts, theme.Faint.Render(" · "))
+	line := strings.Repeat(" ", margin) + strings.Join(append(parts, tail), sep)
 	return ansi.Truncate(line, w, "…")
+}
+
+// helpView, ? ile açılan tam kısayol listesi.
+func (m Model) helpView(w int) []string {
+	keys := [][2]string{
+		{"↑ ↓  j k", "help.move"}, {"enter  →", "help.open"}, {"esc  ←", "help.back"},
+		{"tab", "help.tab"}, {"1 – 8", "help.pages"}, {"", ""},
+		{T("key.space"), "help.pause"}, {"n  p", "help.skip"}, {",  .", "help.seek"},
+		{"+  −", "help.vol"}, {"s", "help.shuf"}, {"r", "help.rep"}, {"", ""},
+		{"t", "help.switch"}, {"o", "help.solo"}, {"", ""},
+		{"?", "help.keys"}, {"q", "help.quit"},
+	}
+	rows := []string{theme.Title.Render(T("help.title")), ""}
+	for _, k := range keys {
+		if k[0] == "" {
+			rows = append(rows, "")
+			continue
+		}
+		rows = append(rows, theme.Plain.Render(fmt.Sprintf("%-12s", k[0]))+theme.Dim.Render(T(k[1])))
+	}
+	return rows
 }
 
 // ---- yardımcılar ----
@@ -358,20 +479,8 @@ func spread(left, right string, w int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-// leader, "sol ········ sağ" satırı: iki ucu noktalı çizgiyle birleştirir.
-func leader(left, right string, w int, ls, rs lipgloss.Style) string {
-	if right == "" {
-		return ls.Render(ansi.Truncate(left, w, "…"))
-	}
-	rw := lipgloss.Width(right)
-	maxLeft := w - rw - 4
-	if maxLeft < 4 {
-		return ls.Render(ansi.Truncate(left, w, "…"))
-	}
-	left = ansi.Truncate(left, maxLeft, "…")
-	dots := w - lipgloss.Width(left) - rw - 2
-	return ls.Render(left) + " " + theme.Faint.Render(strings.Repeat("·", max(dots, 1))) + " " + rs.Render(right)
-}
+func truncate(s string, w int) string { return ansi.Truncate(s, max(w, 1), "…") }
+func textWidth(s string) int          { return lipgloss.Width(s) }
 
 func clock(d time.Duration) string {
 	s := int(d.Seconds())
@@ -383,16 +492,8 @@ func clock(d time.Duration) string {
 
 func entityKind(t string) string {
 	switch t {
-	case "playlist":
-		return "çalma listesi"
-	case "album":
-		return "albüm"
-	case "artist":
-		return "sanatçı"
-	case "show":
-		return "podcast"
-	case "collection":
-		return "beğenilenler"
+	case "playlist", "album", "artist", "show", "collection":
+		return T("kind." + t)
 	}
 	return t
 }
