@@ -168,6 +168,8 @@ func (m Model) content(w, h int) string {
 		rows = m.homeView(w)
 	case m.page == pageDevices:
 		rows = m.devicesView(w)
+	case m.page == pageQueue:
+		rows = m.queueView(w)
 	default:
 		p := pages[m.page]
 		rows = []string{

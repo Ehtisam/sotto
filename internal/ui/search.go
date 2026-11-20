@@ -44,6 +44,7 @@ type searchItem struct {
 	ctx     string   // şarkı bu bağlamda (liste, albüm) çalınsın; boşsa albümünde
 	entry   libEntry // album, playlist ve show açılırken
 	section string   // header satırları için
+	skip    int      // sıra sayfası: bu şarkıya kaç atlamayla gelinir (-1: çalan şarkı)
 }
 
 type searchState struct {
@@ -306,7 +307,11 @@ func (m Model) itemRows(items []searchItem, cursor, scroll, w int, active bool) 
 		it := items[i]
 		switch it.kind {
 		case "header":
-			rows = append(rows, theme.Dim.Italic(true).Render(T(it.section)))
+			text := T(it.section)
+			if it.name != "" {
+				text = it.name // adı değişen başlık (örn. "X listesinden sıradakiler")
+			}
+			rows = append(rows, theme.Dim.Italic(true).Render(text))
 			continue
 		case "space":
 			rows = append(rows, "")

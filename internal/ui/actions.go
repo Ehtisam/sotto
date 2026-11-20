@@ -86,6 +86,10 @@ func (m Model) actionTarget() (searchItem, *libEntry, bool) {
 			if tl == nil && len(m.home.items) > 0 {
 				return m.home.items[m.home.cursor], nil, true
 			}
+		case pageQueue:
+			if items := m.queueItems(); len(items) > 0 {
+				return items[m.queueCursor(items)], nil, true
+			}
 		}
 		if tl != nil && len(tl.tracks) > 0 {
 			t := tl.tracks[tl.cursor]
@@ -97,29 +101,15 @@ func (m Model) actionTarget() (searchItem, *libEntry, bool) {
 	if it == nil || it.URI == "" {
 		return searchItem{}, nil, false
 	}
-	name, artists, album := m.describe(it)
-	t, ok := m.rt.known[it.URI]
-	if !ok {
-		t = spotify.Track{URI: it.URI, Name: name, Type: it.EntityType}
-		if p := it.Decorations.Parent; p != nil {
-			t.Album = spotify.Album{ID: spotify.IDFromURI(p.Entity.URI), URI: p.Entity.URI, Name: album}
-		}
-		for _, c := range it.Decorations.Creators {
-			t.Artists = append(t.Artists, spotify.Artist{Name: c.Entity.Name(), URI: c.Entity.URI})
-		}
-	}
-	item := trackItem(t)
+	_, artists, _ := m.describe(it)
+	item := trackItem(m.trackFromEntity(it))
 	item.sub = artists
 	return item, nil, true
 }
 
 func trackItem(t spotify.Track) searchItem {
-	kind := "track"
-	if t.Type == "episode" {
-		kind = "episode"
-	}
 	tt := t
-	return searchItem{kind: kind, name: t.Name, sub: t.ArtistNames(), uri: t.URI, track: &tt}
+	return searchItem{kind: trackKind(t), name: t.Name, sub: t.ArtistNames(), uri: t.URI, track: &tt}
 }
 
 func entryItem(e libEntry) searchItem {

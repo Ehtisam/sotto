@@ -100,11 +100,13 @@ func (m Model) updateRemote(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		if uri := m.state.Item.URIOrEmpty(); uri != m.remote.lastItem {
 			m.remote.lastItem = uri
+			m.qs.polling = true
 			cmd = m.pollQueue()
 		}
 		return m, cmd
 
 	case queuePollMsg:
+		m.qs.polling, m.qs.fetched = false, m.now
 		q := soloist.QueueChanged{}
 		for _, t := range msg.tracks {
 			q.Upcoming = append(q.Upcoming, soloist.QueueEntry{UID: t.URI, Source: "queue", Item: entityFromTrack(&t)})

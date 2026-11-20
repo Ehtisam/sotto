@@ -38,7 +38,7 @@ var pages = []struct{ numeral, name, soon string }{
 	{"II", "page.home", "soon.home"},
 	{"III", "page.search", "soon.search"},
 	{"IV", "page.library", ""},
-	{"V", "page.queue", "soon.queue"},
+	{"V", "page.queue", ""},
 	{"VI", "page.devices", "soon.devices"},
 	{"VII", "page.profile", "soon.profile"},
 	{"VIII", "page.settings", "soon.settings"},
@@ -46,7 +46,7 @@ var pages = []struct{ numeral, name, soon string }{
 
 // hasContent: içine girilip gezinilebilen sayfalar.
 func (p page) hasContent() bool {
-	return p == pageHome || p == pageLibrary || p == pageDevices || p == pageSearch
+	return p == pageHome || p == pageLibrary || p == pageDevices || p == pageSearch || p == pageQueue
 }
 
 type focusArea int
@@ -121,6 +121,7 @@ type Model struct {
 	search  searchState
 	home    homeState
 	devs    deviceList
+	qs      queueState
 	help    bool // ? ile açılan kısayol listesi
 	actions actionMenu
 	lyr     lyricsState
@@ -353,15 +354,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.flash != "" && m.now.Sub(m.flashAt) > 5*time.Second {
 			m.flash = ""
 		}
-		var cmd, dcmd tea.Cmd
+		var cmd, dcmd, qcmd tea.Cmd
 		m = m.lyricsTick()
 		m, cmd = m.maybePoll()
+		m, qcmd = m.maybeRefreshQueue()
 		if m.page == pageDevices && !m.devs.loading && m.now.Sub(m.devs.fetched) > 5*time.Second {
 			if dcmd = m.loadDevices(); dcmd != nil {
 				m.devs.loading = true
 			}
 		}
-		return m, tea.Batch(tick(), cmd, dcmd, m.fetchCovers(), m.fetchLyrics())
+		return m, tea.Batch(tick(), cmd, dcmd, qcmd, m.fetchCovers(), m.fetchLyrics())
 
 	case engineUpMsg:
 		m.rt.proc, m.rt.client = msg.proc, msg.client
@@ -746,6 +748,8 @@ func (m Model) contentKey(k string) (Model, tea.Cmd, bool) {
 		return m.libraryKey(k)
 	case pageDevices:
 		return m.devicesKey(k)
+	case pageQueue:
+		return m.queueKey(k)
 	}
 	return m, nil, false
 }
@@ -758,6 +762,12 @@ func (m *Model) enterPage() tea.Cmd {
 	}
 	if m.page == pageHome {
 		return m.maybeLoadHome()
+	}
+	if m.page == pageQueue {
+		m.qs.cursor, m.qs.scroll = 0, 0
+		mm, cmd := m.refreshQueue()
+		*m = mm
+		return tea.Batch(cmd, m.maybeLoadHome(), m.enrich())
 	}
 	if m.page == pageDevices && !m.devs.loading {
 		if cmd := m.loadDevices(); cmd != nil {
