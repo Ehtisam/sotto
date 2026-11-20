@@ -79,10 +79,10 @@ func TestDriveLookReal(t *testing.T) {
 		}
 	}
 
-	// Fare: bir satıra tek tıklama seçer (çalmaz).
+	// Fare: bir satıra tek tıklama seçer (çalmaz). Ayarlarda fare kapalıysa tıklama yok sayılır.
 	m = d.model()
 	sel, l := m.selectedContentRow(), m.layout()
-	if sel > 6 {
+	if m.cfg.Look.Mouse && sel > 6 {
 		y := l.bodyTop + sel - 2
 		d.raw(fmt.Sprintf("\x1b[<0;%d;%dM\x1b[<0;%d;%dm", l.contentX+7, y+1, l.contentX+7, y+1))
 		if got := d.model().selectedContentRow(); got != sel-2 {
