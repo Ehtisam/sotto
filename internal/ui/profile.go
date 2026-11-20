@@ -426,7 +426,7 @@ func (m Model) profileKey(k string) (Model, tea.Cmd, bool) {
 // profilePhoto: fotoğraf yeterince yer varsa başlıkta gösterilir.
 func (m Model) profilePhoto() (url string, cols, rows int) {
 	url = pickImage(m.me.Images)
-	if url == "" || m.height < 30 {
+	if url == "" || m.height < 30 || !m.cfg.Look.CoversOn() {
 		return "", 0, 0
 	}
 	return url, 10, 5

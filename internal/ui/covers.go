@@ -51,7 +51,7 @@ func (m Model) fetchCovers() tea.Cmd {
 // nowCoverURL, çalan şarkının kapağı: önce Soloist'in verdiği, yoksa Web API'nin.
 func (m Model) nowCoverURL() string {
 	it := m.state.Item
-	if it == nil {
+	if it == nil || !m.cfg.Look.CoversOn() {
 		return ""
 	}
 	sizes := map[string]string{}
@@ -70,6 +70,9 @@ func (m Model) nowCoverURL() string {
 }
 
 func (m Model) openListCoverURL() string {
+	if !m.cfg.Look.CoversOn() {
+		return ""
+	}
 	switch {
 	case m.page == pageLibrary && m.lib.open != nil:
 		return m.lib.open.entry.image

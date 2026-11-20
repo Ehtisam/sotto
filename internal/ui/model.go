@@ -18,6 +18,7 @@ import (
 	"github.com/Ehtisam/sotto/internal/lyrics"
 	"github.com/Ehtisam/sotto/internal/soloist"
 	"github.com/Ehtisam/sotto/internal/spotify"
+	"github.com/Ehtisam/sotto/internal/ui/theme"
 )
 
 type page int
@@ -41,12 +42,12 @@ var pages = []struct{ numeral, name, soon string }{
 	{"V", "page.queue", ""},
 	{"VI", "page.devices", "soon.devices"},
 	{"VII", "page.profile", ""},
-	{"VIII", "page.settings", "soon.settings"},
+	{"VIII", "page.settings", ""},
 }
 
 // hasContent: içine girilip gezinilebilen sayfalar.
 func (p page) hasContent() bool {
-	return p == pageHome || p == pageLibrary || p == pageDevices || p == pageSearch || p == pageQueue || p == pageProfile
+	return p == pageHome || p == pageLibrary || p == pageDevices || p == pageSearch || p == pageQueue || p == pageProfile || p == pageSettings
 }
 
 type focusArea int
@@ -123,6 +124,7 @@ type Model struct {
 	devs    deviceList
 	qs      queueState
 	prof    profileState
+	set     settingsState
 	help    bool // ? ile açılan kısayol listesi
 	actions actionMenu
 	lyr     lyricsState
@@ -134,6 +136,7 @@ type Model struct {
 
 // New, ayarlarla yeni bir model kurar.
 func New(cfg config.Config) Model {
+	theme.Apply(cfg.Look.Theme, cfg.Look.Accent)
 	m := Model{
 		cfg: cfg,
 		rt: &shared{
@@ -783,6 +786,8 @@ func (m Model) pageKey(k string) (Model, tea.Cmd, bool) {
 		return m.queueKey(k)
 	case pageProfile:
 		return m.profileKey(k)
+	case pageSettings:
+		return m.settingsKey(k)
 	}
 	return m, nil, false
 }

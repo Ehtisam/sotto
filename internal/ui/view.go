@@ -172,6 +172,8 @@ func (m Model) content(w, h int) string {
 		rows = m.queueView(w)
 	case m.page == pageProfile:
 		rows = m.profileView(w)
+	case m.page == pageSettings:
+		rows = m.settingsView(w)
 	default:
 		p := pages[m.page]
 		rows = []string{
@@ -450,6 +452,8 @@ func (m Model) hints(w int) string {
 			hs = append(hs, hint{"tab", T("hint.filter")})
 		case m.page == pageProfile && m.prof.open == nil:
 			hs = append(hs, hint{"tab", T("hint.nextlist")})
+		case m.page == pageSettings:
+			hs = []hint{{"↑ ↓", T("hint.select")}, {"← →", T("hint.change")}}
 		}
 		hs = append(hs, hint{"esc", T("hint.back")}, hint{"1–8", T("hint.pages")})
 	} else {

@@ -314,8 +314,12 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 		info = theme.Error.Render(tl.err.Error())
 	}
 	const cw, ch = 6, 3 // kare: 6 sütun x 6 piksel
+	img := e.image
+	if !m.cfg.Look.CoversOn() {
+		img = ""
+	}
 	textW := w
-	if e.image != "" {
+	if img != "" {
 		textW = w - cw - 2
 	}
 	desc := ""
@@ -323,8 +327,8 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 		desc = theme.Dim.Italic(true).Render(truncate(e.desc, textW))
 	}
 	head := []string{theme.Title.Render(truncate(e.name, textW)), info, desc, ""}
-	if e.image != "" {
-		block := lipgloss.JoinHorizontal(lipgloss.Top, m.coverBox(e.image, cw, ch), "  ", strings.Join(head, "\n"))
+	if img != "" {
+		block := lipgloss.JoinHorizontal(lipgloss.Top, m.coverBox(img, cw, ch), "  ", strings.Join(head, "\n"))
 		head = append(strings.Split(block, "\n")[:ch], "")
 	}
 	rows := head

@@ -21,6 +21,7 @@ import (
 
 type Config struct {
 	Language string  `toml:"language"`
+	Look     Look    `toml:"look"`
 	Spotify  Spotify `toml:"spotify"`
 	Soloist  Soloist `toml:"soloist"`
 	Extras   Extras  `toml:"extras"`
@@ -29,6 +30,16 @@ type Config struct {
 	ConfigDir string `toml:"-"`
 	LocalDir  string `toml:"-"`
 }
+
+// Look: görünüm ayarları.
+type Look struct {
+	Theme  string `toml:"theme"`  // cardo, night, moss, mono, paper
+	Accent string `toml:"accent"` // boş: temanınki; purple, blue, teal, green, amber, pink, red
+	Covers string `toml:"covers"` // pixel ya da off
+}
+
+// CoversOn: kapaklar çizilsin mi.
+func (l Look) CoversOn() bool { return l.Covers != "off" }
 
 type Spotify struct {
 	ClientID string `toml:"client_id"`
@@ -51,7 +62,7 @@ type Soloist struct {
 }
 
 func defaults() Config {
-	return Config{Language: "en", Soloist: Soloist{Autostart: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true}}
+	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "pixel"}, Soloist: Soloist{Autostart: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true}}
 }
 
 // Load, ayar dosyasını okur. Dosya yoksa açıklamalı bir tane yazar.
@@ -81,7 +92,7 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("%s: %w", c.ConfigFile(), err)
 		}
 		// Yeni sürümle gelen bölümler dosyada yoksa açıklamalarıyla eklensin.
-		for _, section := range []string{"[spotify]", "[soloist]", "[extras]"} {
+		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]"} {
 			if !strings.Contains(string(b), section) {
 				exists = false
 			}
@@ -130,6 +141,9 @@ func (c Config) Save() error {
 	}
 	text := fmt.Sprintf(template,
 		quote(c.Language),
+		quote(c.Look.Theme),
+		quote(c.Look.Accent),
+		quote(c.Look.Covers),
 		quote(c.Spotify.ClientID),
 		c.Soloist.Autostart,
 		quote(c.Soloist.APIKey),
@@ -146,6 +160,15 @@ const template = `# sotto settings
 
 # Interface language: "en" or "tr".
 language = %s
+
+[look]
+# Theme: "cardo", "night", "moss", "mono" or "paper" (light).
+theme = %s
+# Accent colour over the theme's own: "purple", "blue", "teal", "green", "amber",
+# "pink" or "red". Leave empty to keep the theme's.
+accent = %s
+# Album covers: "pixel" or "off".
+covers = %s
 
 [spotify]
 # Client ID of your own Spotify app (https://developer.spotify.com/dashboard).
