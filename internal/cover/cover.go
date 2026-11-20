@@ -28,7 +28,8 @@ type Store struct {
 
 	mu     sync.Mutex
 	images map[string]image.Image
-	drawn  map[string]string // url|en|boy -> çizilmiş metin
+	drawn  map[string]string // url|en|boy|… -> çizilmiş metin
+	sixels map[string]*sixelSet
 }
 
 func NewStore(dir string) *Store {
@@ -37,6 +38,7 @@ func NewStore(dir string) *Store {
 		http:   &http.Client{Timeout: 20 * time.Second},
 		images: map[string]image.Image{},
 		drawn:  map[string]string{},
+		sixels: map[string]*sixelSet{},
 	}
 }
 
@@ -85,12 +87,15 @@ func (s *Store) Fetch(ctx context.Context, url string) error {
 	return nil
 }
 
-// Render, kapağı cols sütun, rows satır olarak çizer. Kapak henüz yoksa "" döner.
-func (s *Store) Render(url string, cols, rows int) string {
+// Render, kapağı cols sütun, rows satırlık kutuya yarım bloklarla çizer.
+// ratio, hücrenin gerçek en/boy oranı (genişlik / yükseklik); kapak bu orana
+// göre gerçekten kare görünecek boyutta ortalanır, kalan yer bg ile dolar.
+// Kapak henüz yoksa "" döner.
+func (s *Store) Render(url string, cols, rows int, ratio float64, bg [3]uint8) string {
 	if url == "" || cols <= 0 || rows <= 0 {
 		return ""
 	}
-	k := fmt.Sprintf("%s|%d|%d", url, cols, rows)
+	k := fmt.Sprintf("%s|%d|%d|%.3f|%v", url, cols, rows, ratio, bg)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if out, ok := s.drawn[k]; ok {
@@ -100,15 +105,47 @@ func (s *Store) Render(url string, cols, rows int) string {
 	if !ok {
 		return ""
 	}
-	out := halfBlocks(img, cols, rows)
+	// Bir hücrede üst üste iki piksel: pikselin gerçek oranı 2*ratio.
+	iw, ih := FitSquare(cols, rows*2, 2*ratio)
+	out := halfBlocks(fitGrid(img, cols, rows*2, iw, ih, bg), cols, rows)
 	s.drawn[k] = out
 	return out
 }
 
-// halfBlocks, resmi cols x (rows*2) piksele küçültür ve her hücreye üstte
-// bir, altta bir piksel düşecek şekilde ▀ ile çizer.
-func halfBlocks(img image.Image, cols, rows int) string {
-	px := average(img, cols, rows*2)
+// FitSquare, w x h piksellik alana gerçekte kare görünen en büyük resmin
+// boyutu. pixelRatio, bir pikselin gerçek en/boy oranı.
+func FitSquare(w, h int, pixelRatio float64) (iw, ih int) {
+	if pixelRatio <= 0 {
+		pixelRatio = 1
+	}
+	iw, ih = w, int(float64(w)*pixelRatio+0.5)
+	if ih > h {
+		ih = h
+		iw = int(float64(h)/pixelRatio + 0.5)
+	}
+	return max(1, min(iw, w)), max(1, min(ih, h))
+}
+
+// fitGrid, gw x gh piksellik zemine (bg) iw x ih boyutunda küçültülmüş resmi ortalar.
+func fitGrid(img image.Image, gw, gh, iw, ih int, bg [3]uint8) [][][3]uint8 {
+	px := average(img, iw, ih)
+	ox, oy := (gw-iw)/2, (gh-ih)/2
+	out := make([][][3]uint8, gh)
+	for y := range out {
+		out[y] = make([][3]uint8, gw)
+		for x := range out[y] {
+			out[y][x] = bg
+			if ix, iy := x-ox, y-oy; ix >= 0 && ix < iw && iy >= 0 && iy < ih {
+				out[y][x] = px[iy][ix]
+			}
+		}
+	}
+	return out
+}
+
+// halfBlocks, cols x (rows*2) piksellik ızgarayı, her hücreye üstte bir,
+// altta bir piksel düşecek şekilde ▀ ile çizer.
+func halfBlocks(px [][][3]uint8, cols, rows int) string {
 	var b strings.Builder
 	for y := 0; y < rows; y++ {
 		for x := 0; x < cols; x++ {

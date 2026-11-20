@@ -90,6 +90,9 @@ type shared struct {
 	bridge      *bridge.Bridge
 	lyrics      map[string]*lyrics.Lyrics // URI -> sözler (nil: bulunamadı)
 	lyricsAsked map[string]bool
+
+	gfx gfxShared // gerçek kapak (Sixel) yerleşimi
+	out *Output   // terminal çıktısı (testlerde nil)
 }
 
 // Model, sotto'nun bütün arayüz durumu.
@@ -99,6 +102,7 @@ type Model struct {
 	sp  *spotify.Client
 
 	width, height int
+	gfx           gfxState // terminalin resim desteği
 	page          page
 	focus         focusArea
 	now           time.Time
@@ -163,6 +167,13 @@ func New(cfg config.Config) Model {
 	default:
 		m.spState = spLoggedOut
 	}
+	return m
+}
+
+// WithOutput, terminal çıktısını modele tanıtır (resim şeritleri için; main
+// aynı Output'u tea.WithOutput'a da verir).
+func (m Model) WithOutput(o *Output) Model {
+	m.rt.out = o
 	return m
 }
 
@@ -334,7 +345,7 @@ func openBrowser(u string) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{tick()}
+	cmds := []tea.Cmd{tick(), tea.Raw(gfxQuery)}
 	if m.cfg.Soloist.Autostart {
 		cmds = append(cmds, startSoloist(m.cfg))
 	}
@@ -347,11 +358,21 @@ func (m Model) Init() tea.Cmd {
 // ---- güncelleme ----
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if mm, cmd, ok := m.updateGfx(msg); ok {
+		return mm, cmd
+	}
+	out, cmd := m.update(msg)
+	mm := out.(Model)
+	return mm, tea.Batch(cmd, mm.scheduleGfx())
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.rt.gfx.drawn = nil // Bubble Tea boyut değişince ekranı baştan çizer
 		m.clampLib()
-		return m, nil
+		return m, m.afterResize()
 
 	case tickMsg:
 		m.now = time.Time(msg)
@@ -621,7 +642,7 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Eylem menüsü açıkken tuşlar ona gider.
 	if m.actions.open {
 		if k == "ctrl+c" {
-			return m, tea.Quit
+			return m, m.quit()
 		}
 		return m.actionsKey(k)
 	}
@@ -652,7 +673,7 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	playing := m.state.Status == soloist.StatusPlaying || m.state.Status == soloist.StatusBuffering
 	switch k {
 	case "q", "ctrl+c":
-		return m, tea.Quit
+		return m, m.quit()
 	case "?":
 		m.help = true
 		return m, nil

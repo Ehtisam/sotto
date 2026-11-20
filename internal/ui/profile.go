@@ -28,7 +28,10 @@ const (
 	profileCountRefresh = 5 * time.Minute
 	profileTopCount     = 10
 	profilePanels       = 4
-	profileTopRowsMax   = 5 // üst sıradaki panellerin en çok satırı
+	profileTopRowsMax   = 5  // üst sıradaki panellerin en çok satırı
+	profilePhotoMax     = 8  // profil fotoğrafının en çok satırı
+	profileMinBottom    = 4  // fotoğraf büyürken alt panellere kalacak en az satır
+	profileMinInfo      = 24 // fotoğrafın yanındaki yazılara kalacak en az sütun
 )
 
 type profileTop struct {
@@ -424,16 +427,44 @@ func (m Model) profileKey(k string) (Model, tea.Cmd, bool) {
 }
 
 // profilePhoto: fotoğraf yeterince yer varsa başlıkta gösterilir.
+// Pencere ne kadar uzunsa o kadar büyük (en çok 8 satır), ama alttaki
+// listelere en az profileMinBottom satır, yanındaki yazılara en az
+// profileMinInfo sütun kalacak kadar.
 func (m Model) profilePhoto() (url string, cols, rows int) {
 	url = pickImage(m.me.Images)
-	if url == "" || m.height < 30 || !m.cfg.Look.CoversOn() {
+	if url == "" || !m.cfg.Look.CoversOn() {
 		return "", 0, 0
 	}
-	return url, 10, 5
+	// Gövde: başlık + alt satır + boş (3), fotoğraf, boş (1), üst paneller
+	// (başlık + en çok 5 satır), boş, alt paneller (başlık + satırlar).
+	body := m.height - 7
+	rows = min(profilePhotoMax, body-3-1-(1+profileTopRowsMax)-1-(1+profileMinBottom))
+	rows = min(rows, (m.contentWidth()-3-profileMinInfo)/2) // fotoğraf iki sütun x bir satır
+	if rows < 4 {
+		return "", 0, 0
+	}
+	return url, rows * 2, rows
 }
 
 // profileHeader, ad, fotoğraf ve sayılar.
 func (m Model) profileHeader() []string {
+	url, cw, ch := m.profilePhoto()
+	if url == "" {
+		return m.profileInfo(m.contentWidth())
+	}
+	info := m.profileInfo(m.contentWidth() - cw - 3)
+	for i := 0; i < (ch-len(info))/2; i++ { // yazılar fotoğrafın ortasında dursun
+		info = append([]string{""}, info...)
+	}
+	for len(info) < ch {
+		info = append(info, "")
+	}
+	block := lipgloss.JoinHorizontal(lipgloss.Top, m.coverBox(url, cw, ch), "   ", strings.Join(info, "\n"))
+	return strings.Split(block, "\n")
+}
+
+// profileInfo, ad ve sayılar; sayılar w genişliğine sığmayınca alt satıra geçer.
+func (m Model) profileInfo(w int) []string {
 	p := m.prof
 	name := m.me.DisplayName
 	if name == "" {
@@ -471,32 +502,50 @@ func (m Model) profileHeader() []string {
 	if !p.countsAt.IsZero() {
 		stats2 = append(stats2, F("prof.albums", p.albums), F("prof.shows", p.shows))
 	}
-	sep := theme.Faint.Render(" · ")
-	join := func(parts []string) string {
-		out := make([]string, len(parts))
-		for i, s := range parts {
-			out[i] = theme.Dim.Render(s)
-		}
-		return strings.Join(out, sep)
-	}
-	info := []string{theme.Hi.Bold(true).Render(name), join(stats1), join(stats2)}
+	info := []string{theme.Hi.Bold(true).Render(truncate(name, w))}
+	info = append(info, wrapParts(stats1, w)...)
+	return append(info, wrapParts(stats2, w)...)
+}
 
-	url, cw, ch := m.profilePhoto()
-	if url == "" {
-		return info
+// wrapParts, parçaları " · " ile dizer; satır w'yi aşacaksa alt satıra geçer.
+func wrapParts(parts []string, w int) []string {
+	var lines []string
+	line, lineW := "", 0
+	for _, p := range parts {
+		pw := textWidth(p)
+		if lineW > 0 && lineW+3+pw > w {
+			lines = append(lines, line)
+			line, lineW = "", 0
+		}
+		if lineW > 0 {
+			line += theme.Faint.Render(" · ")
+			lineW += 3
+		}
+		line += theme.Dim.Render(truncate(p, w))
+		lineW += min(pw, w)
 	}
-	info = append([]string{""}, info...) // fotoğrafın ortasına yakın dursun
-	for len(info) < ch {
-		info = append(info, "")
+	if lineW > 0 {
+		lines = append(lines, line)
 	}
-	block := lipgloss.JoinHorizontal(lipgloss.Top, m.coverBox(url, cw, ch), "   ", strings.Join(info, "\n"))
-	return strings.Split(block, "\n")
+	return lines
+}
+
+// contentWidth, sayfa içeriğinin genişliği (body ile aynı hesap).
+func (m Model) contentWidth() int {
+	if w := m.width - margin - menuWidth - gutter - 1; w >= 24 {
+		return w
+	}
+	return m.width - margin - 1
 }
 
 // profileTopRows: başlık, alt satır, boş, profil bilgisi, boş.
 func (m Model) profileTopRows() int {
-	_, _, ch := m.profilePhoto()
-	return 3 + max(ch, 3) + 1
+	url, cw, ch := m.profilePhoto()
+	w := m.contentWidth()
+	if url != "" {
+		w -= cw + 3
+	}
+	return 3 + max(ch, len(m.profileInfo(w))) + 1
 }
 
 // profileListHeight, panellere kalan yükseklik.

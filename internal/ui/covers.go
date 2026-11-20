@@ -106,7 +106,10 @@ func pickImage(imgs []spotify.Image) string {
 
 // coverBox, kapağı ya da kapak yüklenene kadar aynı boyutta boş bir alan.
 func (m Model) coverBox(url string, cols, rows int) string {
-	if s := m.rt.covers.Render(url, cols, rows); s != "" {
+	if m.imagesOn() && m.rt.covers.Has(url) {
+		return m.gfxPlaceholder(url, cols, rows) // resim bir kare sonra gelir (gfx.go)
+	}
+	if s := m.rt.covers.Render(url, cols, rows, m.cellRatio(), groundRGB()); s != "" {
 		return s
 	}
 	line := strings.Repeat(" ", cols)

@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Ehtisam/sotto/internal/config"
+	"github.com/Ehtisam/sotto/internal/soloist"
 )
 
 func typingModel(t *testing.T) Model {
@@ -80,5 +82,19 @@ func TestLyricsKeyGoesToNowPlaying(t *testing.T) {
 	m = press(m, "l", 'l')
 	if !m.lyr.showQueue {
 		t.Fatal("second l should switch to up next")
+	}
+}
+
+// Alt şeritteki simge Spotify'daki düğme gibi: çalarken ❚❚, dururken ▶.
+func TestStripIconIsTheButton(t *testing.T) {
+	m := homeModel(t)
+	m.state.Item = entity("song")
+	m.state.Status = soloist.StatusPlaying
+	if s := m.strip(100); !strings.Contains(s, "❚❚") || strings.Contains(s, "▶") {
+		t.Fatalf("playing strip = %q", s)
+	}
+	m.state.Status = soloist.StatusPaused
+	if s := m.strip(100); !strings.Contains(s, "▶") || strings.Contains(s, "❚❚") {
+		t.Fatalf("paused strip = %q", s)
 	}
 }

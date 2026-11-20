@@ -53,7 +53,8 @@ func (m Model) render() string {
 	// Sabit satırlar: başlık, çizgi, çizgi, şerit (2), boş, kısayollar.
 	bodyH := max(h-7, 1)
 
-	return strings.Join([]string{
+	m.rt.gfx.slots = nil // coverBox resim alanlarını yeniden ayırır
+	screen := strings.Join([]string{
 		m.header(w),
 		rule,
 		m.body(w, bodyH),
@@ -62,6 +63,9 @@ func (m Model) render() string {
 		"",
 		m.hints(w),
 	}, "\n")
+	m.rt.gfx.placed = findPlaces(screen, m.rt.gfx.slots)
+	m.rt.out.setAfter(m.stripsAfter(screen))
+	return screen
 }
 
 // ---- başlık ----
@@ -356,12 +360,13 @@ func (m Model) strip(w int) string {
 
 	var icon string
 	switch m.state.Status {
+	// Spotify'daki gibi düğme: basınca ne olacağını gösterir (çalarken duraklat).
 	case soloist.StatusPlaying:
-		icon = theme.GoldText.Render("▶")
+		icon = theme.GoldText.Render("❚❚")
 	case soloist.StatusBuffering:
 		icon = theme.Dim.Render("…")
 	case soloist.StatusPaused:
-		icon = theme.Dim.Render("❚❚")
+		icon = theme.Dim.Render("▶")
 	default:
 		icon = theme.Faint.Render("·")
 	}

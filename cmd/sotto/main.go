@@ -21,11 +21,12 @@ func main() {
 
 	i18n.Set(cfg.Language)
 
-	m := ui.New(cfg)
+	out := ui.NewOutput(os.Stdout)
+	m := ui.New(cfg).WithOutput(out)
 	// Soloist sotto açıkken çalışır; nasıl çıkılırsa çıkılsın kapatılır.
 	defer m.Shutdown()
 
-	if _, err := tea.NewProgram(m).Run(); err != nil {
+	if _, err := tea.NewProgram(m, tea.WithOutput(out)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "sotto:", err)
 		m.Shutdown()
 		os.Exit(1)

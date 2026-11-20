@@ -111,10 +111,15 @@ func (m Model) settingValue(id settingID) string {
 		}
 		return T("accent." + c.Look.Accent)
 	case setCovers:
-		if c.Look.CoversOn() {
+		switch {
+		case !c.Look.CoversOn():
+			return T("set.off")
+		case c.Look.Covers == "pixel":
 			return T("set.covers.pixel")
+		case m.gfx.sixel:
+			return T("set.covers.image")
 		}
-		return T("set.off")
+		return T("set.covers.nosixel")
 	case setLanguage:
 		if i18n.Lang() == "tr" {
 			return "Türkçe"
@@ -166,11 +171,14 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 		c.Look.Accent = names[cycle(i, d, len(names))]
 		theme.Apply(c.Look.Theme, c.Look.Accent)
 	case setCovers:
-		if c.Look.CoversOn() {
-			c.Look.Covers = "off"
-		} else {
-			c.Look.Covers = "pixel"
+		modes := []string{"image", "pixel", "off"}
+		i := 0
+		for j, mode := range modes {
+			if mode == c.Look.Covers {
+				i = j
+			}
 		}
+		c.Look.Covers = modes[cycle(i, d, len(modes))]
 	case setLanguage:
 		if i18n.Lang() == "tr" {
 			c.Language = "en"

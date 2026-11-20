@@ -35,7 +35,11 @@ type Config struct {
 type Look struct {
 	Theme  string `toml:"theme"`  // cardo, night, moss, mono, paper
 	Accent string `toml:"accent"` // boş: temanınki; purple, blue, teal, green, amber, pink, red
-	Covers string `toml:"covers"` // pixel ya da off
+	Covers string `toml:"covers"` // image (destek varsa resim, yoksa piksel), pixel ya da off
+
+	// CellRatio, hücrenin gerçek en/boy oranı; 0: kendiliğinden. Kapaklar
+	// kare görünmüyorsa elle ayarlanır (ör. 0.45).
+	CellRatio float64 `toml:"cell_ratio"`
 }
 
 // CoversOn: kapaklar çizilsin mi.
@@ -62,7 +66,7 @@ type Soloist struct {
 }
 
 func defaults() Config {
-	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "pixel"}, Soloist: Soloist{Autostart: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true}}
+	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "image"}, Soloist: Soloist{Autostart: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true}}
 }
 
 // Load, ayar dosyasını okur. Dosya yoksa açıklamalı bir tane yazar.
@@ -144,6 +148,7 @@ func (c Config) Save() error {
 		quote(c.Look.Theme),
 		quote(c.Look.Accent),
 		quote(c.Look.Covers),
+		c.Look.CellRatio,
 		quote(c.Spotify.ClientID),
 		c.Soloist.Autostart,
 		quote(c.Soloist.APIKey),
@@ -167,8 +172,13 @@ theme = %s
 # Accent colour over the theme's own: "purple", "blue", "teal", "green", "amber",
 # "pink" or "red". Leave empty to keep the theme's.
 accent = %s
-# Album covers: "pixel" or "off".
+# Album covers: "image" (real pictures where the terminal supports Sixel, like
+# Windows Terminal; pixel blocks elsewhere), "pixel" or "off".
 covers = %s
+# Width / height of one character cell on screen, so covers come out square.
+# 0 works it out (0.45 on Windows Terminal). Set it by hand if covers look
+# stretched, e.g. 0.42 makes them wider, 0.5 taller.
+cell_ratio = %g
 
 [spotify]
 # Client ID of your own Spotify app (https://developer.spotify.com/dashboard).

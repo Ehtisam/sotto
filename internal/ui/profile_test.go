@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/Ehtisam/sotto/internal/spclient"
 	"github.com/Ehtisam/sotto/internal/spotify"
 )
@@ -143,5 +145,47 @@ func TestArrowIntoProfileStartsLoading(t *testing.T) {
 	}
 	if cmd == nil || !m.prof.tops[0].loading {
 		t.Fatal("profile data should start loading while just passing over it in the menu")
+	}
+}
+
+// Profil fotoğrafı pencereyle büyür, alttaki listelere yer bırakır.
+func TestProfilePhotoGrowsWithTheWindow(t *testing.T) {
+	m := profileModel(t)
+	m.me.Images = []spotify.Image{{URL: "https://example.test/me.jpg", Width: 300}}
+	cases := map[int]int{24: 0, 26: 0, 27: 4, 30: 7, 31: 8, 50: 8} // yükseklik → satır
+	for h, want := range cases {
+		m.height = h
+		_, cols, rows := m.profilePhoto()
+		if rows != want || cols != 2*rows {
+			t.Errorf("height %d: photo %dx%d, want %d rows", h, cols, rows, want)
+		}
+		if want > 0 {
+			_, bottom := m.profileRows([profilePanels][]searchItem{make([]searchItem, 10), make([]searchItem, 10)})
+			if bottom < profileMinBottom {
+				t.Errorf("height %d: bottom panels get %d rows", h, bottom)
+			}
+		}
+	}
+}
+
+// Dar pencerede sayılar alt satıra geçer; hiçbir satır taşmaz ("…" yok).
+func TestProfileStatsWrapInsteadOfOverflowing(t *testing.T) {
+	m := profileModel(t)
+	m.me.DisplayName = "Karmathan「 雨 」"
+	m.me.Images = []spotify.Image{{URL: "https://example.test/me.jpg", Width: 300}}
+	m.prof.countsAt, m.prof.following, m.prof.albums = m.now, 12, 1
+	for _, width := range []int{100, 80, 60} {
+		m.width, m.height = width, 31
+		w := m.contentWidth()
+		for _, line := range m.profileHeader() {
+			if textWidth(line) > w {
+				t.Fatalf("width %d: header line %q is %d wide, content is %d", width, ansi.Strip(line), textWidth(line), w)
+			}
+		}
+		// Panellerdeki uzun adlar dar pencerede kısalabilir; başlık kısalmamalı.
+		head := m.profileView(w)[:m.profileTopRows()]
+		if strings.Contains(ansi.Strip(strings.Join(head, " ")), "…") {
+			t.Fatalf("width %d: the header was cut", width)
+		}
 	}
 }
