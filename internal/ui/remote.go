@@ -21,6 +21,9 @@ type remoteState struct {
 	polling  bool
 	lastPoll time.Time
 	lastItem string // sırayı yalnızca şarkı değişince yeniden sormak için
+
+	// player: son Web API durumu; cihazın kısıtları (ses, karıştırma, tekrar) buradan okunur.
+	player *spotify.PlayerState
 }
 
 type pollMsg struct {
@@ -88,11 +91,12 @@ func (m Model) updateRemote(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.spotifyFailed(msg.err), nil
 		}
 		if msg.st == nil {
-			m.remote.active, m.remote.device = false, ""
+			m.remote.active, m.remote.device, m.remote.player = false, "", nil
 			m.state, m.queue = soloist.PlaybackState{}, soloist.QueueChanged{}
 			return m, nil
 		}
 		m.remote.active, m.remote.device = true, msg.st.Device.Name
+		m.remote.player = msg.st
 		if msg.st.Device.ID != "" && msg.st.Device.Name != m.cfg.Soloist.DeviceName {
 			m.devs.switchTo = msg.st.Device.ID // t tuşu buraya geri döner
 		}

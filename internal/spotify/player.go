@@ -14,7 +14,14 @@ type PlayerState struct {
 		Name   string `json:"name"`
 		Type   string `json:"type"`
 		Volume *int   `json:"volume_percent"`
+		// SupportsVolume: false ise cihaz sesinin uzaktan değiştirilmesine izin vermiyor (çoğu telefon).
+		SupportsVolume *bool `json:"supports_volume"`
 	} `json:"device"`
+	// Actions.Disallows: cihazın şu an izin vermediği komutlar (toggling_shuffle,
+	// toggling_repeat_context, toggling_repeat_track, seeking, skipping_next, …).
+	Actions struct {
+		Disallows map[string]bool `json:"disallows"`
+	} `json:"actions"`
 	ShuffleState bool   `json:"shuffle_state"`
 	RepeatState  string `json:"repeat_state"` // off, context, track
 	ProgressMS   int64  `json:"progress_ms"`

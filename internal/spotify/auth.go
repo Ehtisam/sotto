@@ -35,7 +35,7 @@ var scopes = []string{
 	"user-library-read", "user-library-modify",
 	"user-follow-read", "user-follow-modify",
 	"playlist-read-private", "playlist-read-collaborative",
-	"playlist-modify-private", "playlist-modify-public",
+	"playlist-modify-private", "playlist-modify-public", "ugc-image-upload",
 	"user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing",
 }
 

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -80,9 +79,10 @@ type profileCountsMsg struct {
 }
 
 func (m Model) loadProfileTop(rng int) tea.Cmd {
+	rt := m.rt
 	sp, tr := m.sp, profileRanges[rng]
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := apiCtx(rt, 20*time.Second)
 		defer cancel()
 		msg := profileTopMsg{rng: rng}
 		var wg sync.WaitGroup
@@ -97,9 +97,10 @@ func (m Model) loadProfileTop(rng int) tea.Cmd {
 }
 
 func (m Model) loadProfileCounts() tea.Cmd {
+	rt := m.rt
 	sp := m.sp
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := apiCtx(rt, 20*time.Second)
 		defer cancel()
 		var msg profileCountsMsg
 		var wg sync.WaitGroup
@@ -118,9 +119,10 @@ func (m Model) loadProfileCounts() tea.Cmd {
 // bağlanmamışsa ya da bir şey ters giderse sessizce vazgeçer; sayfa o zaman
 // resmî bilgiyle yetinir.
 func (m Model) loadProfileView() tea.Cmd {
+	rt := m.rt
 	br, id := m.rt.bridge, m.me.ID
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := apiCtx(rt, 30*time.Second)
 		defer cancel()
 		for try := 0; try < 2; try++ {
 			tok, err := br.Token(ctx)
@@ -416,6 +418,7 @@ func (m Model) profileKey(k string) (Model, tea.Cmd, bool) {
 		}
 		return m.note(T("prof.opened")), nil, true
 	case "R":
+		m.refreshNow()
 		p.tops[p.rng].fetched, p.countsAt, m.home.fetched = time.Time{}, time.Time{}, time.Time{}
 		return m, m.maybeLoadProfile(), true
 	case "esc", "backspace":

@@ -59,6 +59,7 @@ type trackList struct {
 	err     error
 	cursor  int
 	scroll  int
+	moving  bool // şarkı taşıma isteği yolda
 }
 
 const pageSize = 50
@@ -209,6 +210,15 @@ func (m Model) listKey(tl *trackList, k string) (cmd tea.Cmd, handled, back bool
 			return nil, true, false
 		}
 		return m.playFrom(tl.entry, tl.tracks, tl.cursor), true, false
+	// Taşıma: shift+J aşağı, shift+K yukarı.
+	case "K", "J":
+		d := 1
+		if k == "K" {
+			d = -1
+		}
+		return m.moveInList(tl, d), true, false
+	case "x", "delete":
+		return m.removeFromList(tl), true, false
 	case "esc", "left", "backspace":
 		return nil, true, true
 	default:
@@ -310,6 +320,9 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 		count = " · " + F("search.episodecount", tl.total)
 	}
 	info := theme.Dim.Render(sub) + theme.Faint.Render(count)
+	if e.kind == kindPlaylist && m.editable(e) {
+		info += theme.Faint.Render(T("pl.move") + T("pl.x"))
+	}
 	if tl.err != nil {
 		info = theme.Error.Render(tl.err.Error())
 	}

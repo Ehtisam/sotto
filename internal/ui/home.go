@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -40,12 +39,13 @@ type homeMsg struct {
 }
 
 func (m Model) loadHome() tea.Cmd {
+	rt := m.rt
 	if m.spState != spReady {
 		return nil
 	}
 	sp := m.sp
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := apiCtx(rt, 20*time.Second)
 		defer cancel()
 		var msg homeMsg
 		var wg sync.WaitGroup
@@ -154,7 +154,7 @@ func (m Model) homeItems() []searchItem {
 			ctx = r.Context.URI
 		}
 		tt := t
-		recent = append(recent, searchItem{kind: "track", name: t.Name, sub: t.ArtistNames() + "  " + ago(m.now, r.PlayedAt), uri: t.URI, track: &tt, ctx: ctx})
+		recent = append(recent, searchItem{kind: "track", name: t.Name, sub: t.ArtistNames() + "  " + ago(m.now, r.PlayedAt), uri: t.URI, track: &tt, ctx: ctx, history: true})
 	}
 	section("home.recent", recent)
 
@@ -264,6 +264,7 @@ func (m Model) homeKey(k string) (Model, tea.Cmd, bool) {
 		}
 		return m, cmd, true
 	case "R":
+		m.refreshNow()
 		h.fetched = time.Time{}
 		cmd := m.maybeLoadHome()
 		return m, cmd, true

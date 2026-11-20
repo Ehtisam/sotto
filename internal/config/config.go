@@ -25,6 +25,8 @@ type Config struct {
 	Spotify  Spotify `toml:"spotify"`
 	Soloist  Soloist `toml:"soloist"`
 	Extras   Extras  `toml:"extras"`
+	Desktop  Desktop `toml:"desktop"`
+	Hooks    Hooks   `toml:"hooks"`
 
 	// Doldurulan yollar (dosyada yok).
 	ConfigDir string `toml:"-"`
@@ -54,8 +56,30 @@ type Extras struct {
 	Enabled bool `toml:"enabled"`
 }
 
+// Desktop: işletim sistemiyle bağlar (bildirimler, medya tuşları).
+type Desktop struct {
+	// Notify: şarkı değişince bildirim: "always", "unfocused" (sotto'nun
+	// penceresi öndeyken gösterme) ya da "off".
+	Notify      string `toml:"notify"`
+	NotifyTitle string `toml:"notify_title"`
+	NotifyBody  string `toml:"notify_body"`
+	// MediaControls: medya tuşları ve Windows'un medya kartı.
+	MediaControls bool `toml:"media_controls"`
+	// StartMenu: Başlat menüsünde kısayol (Windows medya kartında ve
+	// bildirimlerde "sotto" adı ve simgesi için gerekli).
+	StartMenu bool `toml:"start_menu"`
+}
+
+// Hooks: olaylarda çalıştırılan komutlar.
+type Hooks struct {
+	OnTrackChange  string `toml:"on_track_change"`
+	OnStatusChange string `toml:"on_status_change"`
+}
+
 type Soloist struct {
 	Autostart     bool   `toml:"autostart"`
+	Resume        bool   `toml:"resume"`
+	AutoUpdate    bool   `toml:"auto_update"`
 	APIKey        string `toml:"api_key"`
 	Path          string `toml:"path"`
 	DeviceName    string `toml:"device_name"`
@@ -66,7 +90,8 @@ type Soloist struct {
 }
 
 func defaults() Config {
-	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "image"}, Soloist: Soloist{Autostart: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true}}
+	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "image"}, Soloist: Soloist{Autostart: true, Resume: true, AutoUpdate: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true},
+		Desktop: Desktop{Notify: "unfocused", NotifyTitle: "{title}", NotifyBody: "{artist} · {album}", MediaControls: true, StartMenu: true}}
 }
 
 // Load, ayar dosyasını okur. Dosya yoksa açıklamalı bir tane yazar.
@@ -96,7 +121,7 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("%s: %w", c.ConfigFile(), err)
 		}
 		// Yeni sürümle gelen bölümler dosyada yoksa açıklamalarıyla eklensin.
-		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]"} {
+		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]", "[desktop]", "[hooks]", "resume =", "auto_update =", "start_menu ="} {
 			if !strings.Contains(string(b), section) {
 				exists = false
 			}
@@ -151,11 +176,20 @@ func (c Config) Save() error {
 		c.Look.CellRatio,
 		quote(c.Spotify.ClientID),
 		c.Soloist.Autostart,
+		c.Soloist.Resume,
+		c.Soloist.AutoUpdate,
 		quote(c.Soloist.APIKey),
 		quote(c.Soloist.Path),
 		quote(c.Soloist.DeviceName),
 		c.Soloist.InitialVolume,
 		c.Extras.Enabled,
+		quote(c.Desktop.Notify),
+		quote(c.Desktop.NotifyTitle),
+		quote(c.Desktop.NotifyBody),
+		c.Desktop.MediaControls,
+		c.Desktop.StartMenu,
+		quote(c.Hooks.OnTrackChange),
+		quote(c.Hooks.OnStatusChange),
 	)
 	return os.WriteFile(c.ConfigFile(), []byte(text), 0o600)
 }
@@ -189,6 +223,13 @@ client_id = %s
 # Light mode plays through Spotify Soloist on this computer.
 # Start Soloist when sotto opens. You can also start and stop it with "o".
 autostart = %t
+# When nothing is playing anywhere, load where you left off (paused) once
+# Soloist is up.
+resume = %t
+# Each Soloist build stops working 90 days after it is made. With this on,
+# sotto downloads Spotify's newer build in the background when 14 days are
+# left; the music doesn't stop, the new build is used the next time Soloist starts.
+auto_update = %t
 # Soloist API key (https://developer.spotify.com/dashboard/soloist). Keep it private.
 api_key = %s
 # Leave empty to use the copy sotto keeps in its own folder.
@@ -202,6 +243,30 @@ initial_volume = %d
 # They start go-librespot for a few seconds about once an hour to get a key.
 # Turn this off to use only official routes (lyrics then come from LRCLIB).
 enabled = %t
+
+[desktop]
+# Notification when the song changes: "always", "unfocused" (only when sotto's
+# window is not in front) or "off".
+notify = %s
+# Notification text. Fields: {title} {artist} {album} {context} {device}.
+notify_title = %s
+notify_body = %s
+# Media keys and the system media card (Windows: volume flyout, lock screen).
+media_controls = %t
+# Windows: put sotto in the Start menu. Windows takes the name and icon on the
+# media card and on notifications from there; without it the card says
+# "Unknown app".
+start_menu = %t
+
+[hooks]
+# Commands run in the background (cmd /C on Windows, sh -c elsewhere). The
+# details come in environment variables: SOTTO_EVENT, SOTTO_TITLE,
+# SOTTO_ARTIST, SOTTO_ALBUM, SOTTO_URI, SOTTO_CONTEXT, SOTTO_DEVICE,
+# SOTTO_STATUS, SOTTO_DURATION_MS, SOTTO_COVER_URL.
+# Runs when the song changes.
+on_track_change = %s
+# Runs when playback starts, pauses or stops.
+on_status_change = %s
 `
 
 // quote, bir metni TOML dizgisi olarak yazar.

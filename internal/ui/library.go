@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ehtisam/sotto/internal/spclient"
 	"github.com/Ehtisam/sotto/internal/spotify"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
 )
@@ -25,6 +25,9 @@ type library struct {
 	scroll  int
 
 	open *trackList // nil: liste düzeyi
+
+	root   *spclient.Rootlist // kitaplığın sırası ve klasörleri (✱, folders.go)
+	folder string             // "Hepsi"nde içinde bulunulan klasör ("" kök)
 }
 
 // Kitaplık süzgeçleri; tab ile geçilir.
@@ -85,6 +88,9 @@ func (m Model) onProfile(e libEntry) bool {
 // libVisible, seçili süzgece uyan girişler.
 func (m Model) libVisible() []libEntry {
 	if m.lib.filter == libAll {
+		if m.foldersOn() {
+			return m.levelEntries(m.lib.folder)
+		}
 		return m.lib.entries
 	}
 	var out []libEntry
@@ -126,9 +132,10 @@ type playlistsMsg struct {
 }
 
 func (m Model) loadLibrary() tea.Cmd {
+	rt := m.rt
 	sp := m.sp
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := apiCtx(rt, 60*time.Second)
 		defer cancel()
 		liked, err := sp.LikedTracks(ctx, 0, 1)
 		if err != nil {
@@ -179,6 +186,7 @@ func (m Model) updateLibrary(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.home.fetched.IsZero() {
 			m.rebuildHome() // liste adları artık biliniyor
 		}
+		return m, m.loadRootlist() // klasörler ve kitaplık sırası
 	case tracksPageMsg:
 		for _, tl := range []*trackList{m.lib.open, m.search.open, m.home.open, m.prof.open} {
 			if tl.receive(msg) {
@@ -263,10 +271,39 @@ func (m Model) libraryKey(k string) (Model, tea.Cmd, bool) {
 		if len(vis) == 0 {
 			return m, nil, true
 		}
+		if e := vis[min(l.cursor, len(vis)-1)]; e.kind == kindFolder {
+			return m.enterFolder(e.key), nil, true
+		}
 		tl, cmd := m.openList(vis[min(l.cursor, len(vis)-1)])
 		l.open = tl
 		return m, cmd, true
+	case "x", "delete":
+		// Kendi listende ya da klasörde: silme onayı.
+		if len(vis) == 0 {
+			return m, nil, true
+		}
+		e := vis[min(l.cursor, len(vis)-1)]
+		if !m.ownList(e) && e.kind != kindFolder {
+			return m, nil, true
+		}
+		m.actions = actionMenu{open: true, target: entryItem(e), confirm: true, saved: -1}
+		return m, nil, true
+	case "f":
+		if !m.foldersOn() {
+			return m.say(T("folder.extras")), nil, true
+		}
+		return m.openFolderForm(nil), nil, true
+	case "K", "J": // shift+J aşağı, shift+K yukarı
+		d := 1
+		if k == "K" {
+			d = -1
+		}
+		mm, cmd := m.moveInLibrary(d)
+		return mm, cmd, true
 	case "esc", "left", "backspace":
+		if l.folder != "" && m.foldersOn() && l.filter == libAll {
+			return m.leaveFolder(), nil, true
+		}
 		m.focus = focusMenu
 	default:
 		return m, nil, false
@@ -306,6 +343,9 @@ func (m Model) libraryView(w, h int) []string {
 	title := theme.Title.Render(T("page.library"))
 	if rows := m.accountView(title); rows != nil {
 		return rows
+	}
+	if path := m.folderTitle(); path != "" {
+		title += theme.Faint.Render(" › ") + theme.Title.Render(path)
 	}
 	l := m.lib
 	active := m.focus == focusContent
@@ -365,6 +405,9 @@ func (m Model) libraryView(w, h int) []string {
 		}
 		info := F("lib.songs", e.total)
 		switch {
+		case e.kind == kindFolder:
+			name = "▸ " + name
+			info = folderInfo(e.total)
 		case e.kind == kindPlaylist && m.mine(e) && m.onProfile(e):
 			info = T("lib.onprofile") + " · " + info // profilde olan zaten herkese açık
 		case e.kind == kindPlaylist && e.public && m.mine(e):

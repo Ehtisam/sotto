@@ -130,6 +130,8 @@ type Device struct {
 	Type     string `json:"type"`
 	IsActive bool   `json:"is_active"`
 	Volume   *int   `json:"volume_percent"`
+	// SupportsVolume: false ise sesi uzaktan değiştirilemez.
+	SupportsVolume *bool `json:"supports_volume"`
 }
 
 // IDFromURI, "spotify:track:ID" biçiminden ID'yi alır.
@@ -240,4 +242,19 @@ func deviceQuery(id string) string {
 		return ""
 	}
 	return "?device_id=" + url.QueryEscape(id)
+}
+
+// PlayFrom, bir bağlamı verilen şarkıdan ve konumdan başlatır (kaldığın
+// yerden devam). Bağlam yoksa yalnızca şarkıyı çalar.
+func (c *Client) PlayFrom(ctx context.Context, deviceID, contextURI, trackURI string, positionMS int64) error {
+	body := map[string]any{"position_ms": positionMS}
+	if contextURI != "" {
+		body["context_uri"] = contextURI
+		if trackURI != "" {
+			body["offset"] = map[string]string{"uri": trackURI}
+		}
+	} else {
+		body["uris"] = []string{trackURI}
+	}
+	return c.do(ctx, http.MethodPut, "me/player/play"+deviceQuery(deviceID), body, nil)
 }

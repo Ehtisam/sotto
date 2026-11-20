@@ -28,6 +28,7 @@ type queueState struct {
 	scroll  int
 	polling bool      // kumanda: sıra soruluyor
 	fetched time.Time // kumanda: sıranın en son sorulduğu an
+	editing bool      // silme ya da taşıma komutu yolda
 }
 
 // queueItems, sayfanın satırları. Her çizimde durumdan yeniden kurulur;
@@ -222,7 +223,17 @@ func (m Model) queueKey(k string) (Model, tea.Cmd, bool) {
 		}
 		_, cmd := m.actOn(it) // son çalınanlar: kendi bağlamında çalar
 		return m, cmd, true
+	case "x", "delete":
+		mm, cmd := m.editQueue(0)
+		return mm, cmd, true
+	case "K":
+		mm, cmd := m.editQueue(-1)
+		return mm, cmd, true
+	case "J":
+		mm, cmd := m.editQueue(1)
+		return mm, cmd, true
 	case "R":
+		m.refreshNow()
 		m.home.fetched = time.Time{}
 		mm, cmd := m.refreshQueue()
 		hcmd := mm.maybeLoadHome()
@@ -248,6 +259,9 @@ func (m Model) queueView(w int) []string {
 	sub := T("queue.sub")
 	if m.remote.active && m.remote.device != "" {
 		sub = F("queue.sub.remote", m.remote.device)
+	}
+	if m.cfg.Extras.Enabled {
+		sub += " " + T("queue.sub.edit")
 	}
 	rows := []string{title, theme.Dim.Render(sub), "", ""}
 	items := m.queueItems()

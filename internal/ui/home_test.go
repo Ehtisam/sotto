@@ -93,3 +93,21 @@ func TestAgo(t *testing.T) {
 		}
 	}
 }
+
+func TestRecentRowsAreMarkedHistory(t *testing.T) {
+	m := homeModel(t)
+	m.home.recent = []spotify.PlayHistory{play("x", "spotify:playlist:pl", "playlist", m.now.Add(-time.Hour))}
+	m.rebuildHome()
+	found := false
+	for _, it := range m.homeItems() {
+		if it.kind == "track" && it.ctx != "" {
+			found = true
+			if !it.history {
+				t.Fatalf("recent row %q not marked as history", it.name)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no recent row with a context in the test data")
+	}
+}

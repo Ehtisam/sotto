@@ -7,13 +7,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Ehtisam/sotto/internal/bridge"
+	"github.com/Ehtisam/sotto/internal/cli"
 	"github.com/Ehtisam/sotto/internal/config"
 	"github.com/Ehtisam/sotto/internal/cover"
+	"github.com/Ehtisam/sotto/internal/desktop"
 	"github.com/Ehtisam/sotto/internal/i18n"
 	"github.com/Ehtisam/sotto/internal/lyrics"
 	"github.com/Ehtisam/sotto/internal/soloist"
@@ -96,7 +99,25 @@ type shared struct {
 	// contextNames: adını Spotify'ın vermediği bağlamlar (radyo, Spotify'ın listeleri).
 	contextNames map[string]string
 	out          *Output // terminal çıktısı (testlerde nil)
+
+	ev events // bildirim, olay komutları, medya kartı, kaldığın yer (events.go)
+
+	// freshUntil: R'ye basıldı; bu ana kadar başlayan yüklemeler önbelleği atlar.
+	freshUntil time.Time
 }
+
+// apiCtx, sayfa yüklemeleri için zaman aşımlı bağlam; R'den hemen sonraysa
+// Spotify'ın önbelleği atlanır (spotify.Fresh).
+func apiCtx(rt *shared, d time.Duration) (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if rt != nil && time.Now().Before(rt.freshUntil) {
+		ctx = spotify.Fresh(ctx)
+	}
+	return context.WithTimeout(ctx, d)
+}
+
+// refreshNow: R tuşu; ardından başlayan yüklemeler Spotify'a yeniden sorar.
+func (m Model) refreshNow() { m.rt.freshUntil = time.Now().Add(3 * time.Second) }
 
 // Model, sotto'nun bütün arayüz durumu.
 type Model struct {
@@ -136,6 +157,9 @@ type Model struct {
 	wiz     wizardState
 	actions actionMenu
 	lyr     lyricsState
+	sleep   sleepState
+	shiftAt time.Time // shift basılı (shift.go); sıfır: değil
+	form    plForm    // liste formu (plform.go)
 
 	flash     string
 	flashAt   time.Time
@@ -157,6 +181,11 @@ func New(cfg config.Config) Model {
 		sp:  spotify.NewClient(cfg.Spotify.ClientID, cfg.TokenFile()),
 		now: time.Now(),
 	}
+	m.search.recent = loadRecent(cfg.LocalDir)
+	m.rt.ev.focused = true
+	m.rt.ev.last = loadLast(cfg.LocalDir)
+	desktop.SetDataDir(cfg.LocalDir)
+	soloist.CleanOld(cfg.SoloistPath()) // önceki güncellemeden kalan eski sürüm
 	if cfg.Soloist.Autostart {
 		m.engine = engineStarting
 	} else {
@@ -185,6 +214,11 @@ func (m Model) WithOutput(o *Output) Model {
 
 // Shutdown, sotto'nun başlattığı Soloist'i ve bağlantıyı kapatır.
 func (m Model) Shutdown() {
+	saveLast(m.cfg.LocalDir, m.rt.ev.last)
+	if m.rt.ev.media != nil {
+		m.rt.ev.media.Close()
+		m.rt.ev.media = nil
+	}
 	m.rt.bridge.Close()
 	if m.rt.client != nil {
 		m.rt.client.Close()
@@ -306,13 +340,21 @@ func (m Model) control(viaSoloist func(context.Context, *soloist.Client) error, 
 		}
 		return func() tea.Msg { return flashMsg(i18n.T("flash.noaccount")) }
 	}
-	sp := m.sp
+	sp, device := m.sp, m.remoteDeviceName()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := viaAPI(ctx, sp); err != nil {
 			if spotify.IsStatus(err, 404) {
 				return flashMsg(i18n.T("flash.nodevice"))
+			}
+			if spotify.IsStatus(err, 403) { // cihazın kısıtı (telefon sesi, kapalı tekrar…)
+				if strings.Contains(err.Error(), "volume") {
+					return flashMsg(i18n.F("flash.novolume", device))
+				}
+				if strings.Contains(err.Error(), "Restriction violated") {
+					return flashMsg(i18n.F("flash.disallowed", device))
+				}
 			}
 			return flashMsg(err.Error())
 		}
@@ -359,6 +401,12 @@ func (m Model) Init() tea.Cmd {
 	if m.spState == spReady {
 		cmds = append(cmds, m.loadMe(), m.loadLibrary(), m.loadHome())
 	}
+	if m.cfg.Desktop.MediaControls {
+		cmds = append(cmds, openMedia())
+	}
+	if !m.wiz.on {
+		cmds = append(cmds, m.readSoloistBuild()) // süre uyarısı ve Ayarlar için
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -368,12 +416,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.updateGfx(msg); ok {
 		return mm, cmd
 	}
+	before := m.snap()
 	out, cmd := m.update(msg)
 	mm := out.(Model)
-	return mm, tea.Batch(cmd, mm.scheduleGfx())
+	return mm, tea.Batch(cmd, mm.scheduleGfx(), mm.observe(before))
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if mm, ok := m.shiftEvent(msg); ok {
+		return mm, nil
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -386,8 +438,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.flash != "" && m.now.Sub(m.flashAt) > 5*time.Second {
 			m.flash = ""
 		}
-		var cmd, dcmd, qcmd tea.Cmd
+		var cmd, dcmd, qcmd, scmd tea.Cmd
 		m = m.lyricsTick()
+		m, scmd = m.sleepTick()
 		m, cmd = m.maybePoll()
 		m, qcmd = m.maybeRefreshQueue()
 		if m.page == pageDevices && !m.devs.loading && m.now.Sub(m.devs.fetched) > 5*time.Second {
@@ -395,7 +448,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.devs.loading = true
 			}
 		}
-		return m, tea.Batch(tick(), cmd, dcmd, qcmd, m.fetchCovers(), m.fetchLyrics())
+		return m, tea.Batch(tick(), cmd, dcmd, qcmd, scmd, m.fetchCovers(), m.fetchLyrics())
 
 	case engineUpMsg:
 		m.rt.proc, m.rt.client = msg.proc, msg.client
@@ -404,7 +457,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engineErrMsg:
 		m.engine, m.engineErr = engineFailed, msg.err
-		return m, nil
+		return m, m.readSoloistBuild()
 
 	case engineDownMsg:
 		if msg.c != m.rt.client {
@@ -483,6 +536,21 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case radioMsg:
 		return m.updateRadio(msg)
 
+	case queueEditMsg:
+		return m.updateQueueEdit(msg)
+
+	case plSavedMsg:
+		return m.updatePlaylistForm(msg)
+
+	case plDeletedMsg:
+		return m.updatePlaylistDeleted(msg)
+
+	case rootlistMsg:
+		return m.updateRootlist(msg)
+
+	case plMovedMsg:
+		return m.updateListMove(msg)
+
 	case wizDownloadedMsg, wizBridgeMsg, wizBridgeRetryMsg:
 		return m.updateWizard(msg)
 
@@ -490,6 +558,29 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.wiz.on {
 			return m.wizardPaste(msg.Content), nil
 		}
+
+	case IPCMsg:
+		return m.updateIPC(msg)
+
+	case ipcFoundMsg:
+		return m, m.playFound(msg.uri, msg.label, msg.reply)
+
+	case soloistBuildMsg, soloistUpdatedMsg:
+		return m.updateSettingsMsg(msg)
+
+	case mediaOpenedMsg, mediaEventMsg:
+		return m.updateMedia(msg)
+
+	case tea.FocusMsg:
+		m.rt.ev.focused = true
+		return m, nil
+
+	case tea.BlurMsg:
+		m.rt.ev.focused = false
+		return m, nil
+
+	case resumedMsg:
+		return m, pollSoonMsgCmd()
 
 	case coverMsg:
 		return m, nil // kapak artık bellekte; bir sonraki çizimde görünür
@@ -549,10 +640,13 @@ func (m *Model) apply(ev any) tea.Cmd {
 				}
 				return c.RequestQueue(ctx, 20)
 			})}
-			// Soloist kullanıcı istediği için açıldıysa müziği ona al.
+			// Soloist kullanıcı istediği için açıldıysa müziği ona al;
+			// açılıştaysa ve hiçbir yerde bir şey çalmıyorsa kaldığın yeri yükle.
 			if m.devs.pending != "" && m.spState == spReady {
 				cmds = append(cmds, m.transferByName(m.devs.pending))
 				m.devs.pending = ""
+			} else {
+				cmds = append(cmds, m.maybeResume())
 			}
 			return tea.Batch(cmds...)
 		}
@@ -666,6 +760,14 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.wizardKey(msg)
 	}
 
+	// Liste formu açıkken tuşlar ona gider.
+	if m.form.on {
+		if k == "ctrl+c" {
+			return m, m.quit()
+		}
+		return m.formKey(msg)
+	}
+
 	// Eylem menüsü açıkken tuşlar ona gider.
 	if m.actions.open {
 		if k == "ctrl+c" {
@@ -697,7 +799,6 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	playing := m.state.Status == soloist.StatusPlaying || m.state.Status == soloist.StatusBuffering
 	switch k {
 	case "q", "ctrl+c":
 		return m, m.quit()
@@ -741,52 +842,33 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "space", " ":
-		if playing {
-			return m, m.control(
-				func(ctx context.Context, c *soloist.Client) error { return c.Pause(ctx) },
-				func(ctx context.Context, s *spotify.Client) error { return s.Pause(ctx) })
-		}
-		return m, m.control(
-			func(ctx context.Context, c *soloist.Client) error { return c.Play(ctx, "") },
-			func(ctx context.Context, s *spotify.Client) error { return s.Resume(ctx) })
+		return m, m.playPause()
 	case "n":
-		return m, m.control(
-			func(ctx context.Context, c *soloist.Client) error { return c.Next(ctx) },
-			func(ctx context.Context, s *spotify.Client) error { return s.Next(ctx) })
+		// Kitaplık'ta n yeni liste açar (menüde, listede, açık listede); başka
+		// yerde sonraki şarkı.
+		if m.page == pageLibrary && m.spState == spReady {
+			return m.openPlaylistForm(nil, ""), nil
+		}
+		return m, m.next()
 	case "p":
-		return m, m.control(
-			func(ctx context.Context, c *soloist.Client) error { return c.Previous(ctx) },
-			func(ctx context.Context, s *spotify.Client) error { return s.Previous(ctx) })
+		return m, m.previous()
 	case ",", "<", ".", ">":
 		step := 10 * time.Second
 		if k == "," || k == "<" {
 			step = -step
 		}
-		ms := (m.position() + step).Milliseconds()
-		return m, m.control(
-			func(ctx context.Context, c *soloist.Client) error { return c.Seek(ctx, ms) },
-			func(ctx context.Context, s *spotify.Client) error { return s.Seek(ctx, ms) })
+		return m, m.seekTo(m.position() + step)
 	case "+", "=", "-":
 		v := m.state.Volume + 5
 		if k == "-" {
 			v = m.state.Volume - 5
 		}
-		return m, m.control(
-			func(ctx context.Context, c *soloist.Client) error { return c.SetVolume(ctx, v) },
-			func(ctx context.Context, s *spotify.Client) error { return s.SetVolume(ctx, v) })
+		return m, m.setVolume(v)
 	case "s":
-		on := !m.state.Options.Shuffle
-		return m, m.control(
-			func(ctx context.Context, c *soloist.Client) error { return c.SetShuffle(ctx, on) },
-			func(ctx context.Context, s *spotify.Client) error { return s.SetShuffle(ctx, on) })
+		return m, m.setShuffle(!m.state.Options.Shuffle)
 	case "r":
-		next := map[string]string{"off": "context", "context": "track", "track": "off"}[m.state.Options.Repeat]
-		if next == "" {
-			next = "context"
-		}
-		return m, m.control(
-			func(ctx context.Context, c *soloist.Client) error { return c.SetRepeat(ctx, next) },
-			func(ctx context.Context, s *spotify.Client) error { return s.SetRepeat(ctx, next) })
+		next, _ := cli.NextRepeat("", m.state.Options.Repeat)
+		return m, m.setRepeat(next)
 	case "t":
 		return m.switchSpeaker()
 	case "a":
@@ -807,6 +889,14 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "L":
 		return m.openLyricsLogin()
+	case "z":
+		return m.cycleSleep(), nil
+	case "N":
+		// Yeni liste: her sayfadan, menüdeyken de.
+		if m.spState != spReady {
+			return m.say(T("flash.noaccount")), nil
+		}
+		return m.openPlaylistForm(nil, ""), nil
 	}
 	return m, nil
 }

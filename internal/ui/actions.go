@@ -30,6 +30,11 @@ const (
 	actUnsave
 	actLink
 	actRadio
+	actEdit
+	actDelete
+	actOpenFolder
+	actRenameFolder
+	actMoveFolder
 )
 
 type menuItem struct {
@@ -50,6 +55,11 @@ type actionMenu struct {
 	lists    []libEntry
 	plCursor int
 	plScroll int
+
+	confirm bool // "listeyi sil" / "klasörü sil": onay bekleniyor
+
+	folderPick bool           // "klasöre taşı": klasör seçiliyor (plCursor/plScroll)
+	folders    []folderChoice // seçenekler
 }
 
 type savedStateMsg struct {
@@ -134,7 +144,7 @@ func (m Model) openActions() (Model, tea.Cmd) {
 	}
 	m.actions = actionMenu{open: true, target: target, from: from, saved: -1}
 	m.actions.items = m.menuItems()
-	if target.uri == "" || target.kind == "liked" {
+	if target.uri == "" || target.kind == "liked" || target.kind == kindFolder {
 		return m, nil
 	}
 	sp, uri := m.sp, target.uri
@@ -191,7 +201,19 @@ func (m Model) menuItems() []menuItem {
 		add(actOpen, "o", "act.open")
 		add(actPlay, "p", "act.play")
 		if t.kind == "playlist" {
-			save("act.follow", "act.unfollow")
+			if m.editable(t.entry) {
+				add(actEdit, "e", "act.edit")
+			}
+			if m.foldersOn() && m.inRootlist(t.entry) {
+				add(actMoveFolder, "m", "act.movefolder")
+			}
+			if m.ownList(t.entry) {
+				// Spotify'da kendi listeni takipten çıkarmak onu silmek demek;
+				// "takibi bırak" yerine açıkça "sil" (onaylı).
+				add(actDelete, "d", "act.delete")
+			} else {
+				save("act.follow", "act.unfollow")
+			}
 		} else if t.kind != "liked" {
 			save("act.save", "act.unsave")
 		}
@@ -201,8 +223,13 @@ func (m Model) menuItems() []menuItem {
 			add(actRadio, "g", "act.radio.artist")
 		}
 		save("act.follow", "act.unfollow")
+	case kindFolder:
+		add(actOpenFolder, "o", "act.open")
+		add(actRenameFolder, "e", "act.renamefolder")
+		add(actMoveFolder, "m", "act.movefolder")
+		add(actDelete, "d", "act.delfolder")
 	}
-	if t.uri != "" && t.kind != "liked" {
+	if t.uri != "" && t.kind != "liked" && t.kind != kindFolder {
 		add(actLink, "c", "act.link")
 	}
 	return out
@@ -217,18 +244,50 @@ func (m Model) editable(e libEntry) bool {
 
 func (m Model) actionsKey(k string) (Model, tea.Cmd) {
 	a := &m.actions
+	if a.folderPick {
+		switch k {
+		case "up", "k":
+			a.plCursor = max(0, a.plCursor-1)
+		case "down", "j":
+			a.plCursor = min(len(a.folders)-1, a.plCursor+1)
+		case "enter", "right":
+			c, e := a.folders[a.plCursor], a.target.entry
+			m.actions = actionMenu{}
+			return m, m.moveToFolder(e, c.id, c.name)
+		case "esc", "left", "backspace":
+			a.folderPick = false
+		}
+		a.plCursor, a.plScroll = fitScroll(a.plCursor, a.plScroll, len(a.folders), m.listHeight())
+		return m, nil
+	}
+	if a.confirm {
+		switch k {
+		case "enter", "d", "y":
+			if a.target.kind == kindFolder {
+				return m.deleteFolder(a.target.entry)
+			}
+			return m.deletePlaylist(a.target.entry)
+		default: // esc ve diğerleri: vazgeç; menüden gelindiyse menüye dön
+			if len(a.items) == 0 {
+				m.actions = actionMenu{}
+			} else {
+				a.confirm = false
+			}
+		}
+		return m, nil
+	}
 	if a.picking {
 		h := m.listHeight()
 		switch k {
 		case "up", "k":
 			a.plCursor = max(0, a.plCursor-1)
 		case "down", "j":
-			a.plCursor = min(len(a.lists)-1, a.plCursor+1)
+			a.plCursor = min(len(a.lists), a.plCursor+1)
 		case "enter", "right":
-			if len(a.lists) == 0 {
-				return m, nil
+			if a.plCursor == 0 { // yeni liste
+				return m.openPlaylistForm(nil, a.target.uri), nil
 			}
-			pl := a.lists[a.plCursor]
+			pl := a.lists[a.plCursor-1]
 			uri := a.target.uri
 			m.actions = actionMenu{}
 			return m, m.spotifyAction(func(ctx context.Context, sp *spotify.Client) error {
@@ -237,7 +296,7 @@ func (m Model) actionsKey(k string) (Model, tea.Cmd) {
 		case "esc", "left", "backspace":
 			a.picking = false
 		}
-		a.plCursor, a.plScroll = fitScroll(a.plCursor, a.plScroll, len(a.lists), h)
+		a.plCursor, a.plScroll = fitScroll(a.plCursor, a.plScroll, len(a.lists)+1, h)
 		return m, nil
 	}
 
@@ -278,6 +337,23 @@ func (m Model) runAction(id actID) (Model, tea.Cmd) {
 		}
 		m.actions.plCursor, m.actions.plScroll = 0, 0
 		return m, nil
+	}
+	switch id {
+	case actDelete:
+		m.actions.confirm = true
+		return m, nil
+	case actMoveFolder:
+		m.actions.folderPick = true
+		m.actions.folders = m.folderChoices(t.entry)
+		m.actions.plCursor, m.actions.plScroll = 0, 0
+		return m, nil
+	case actOpenFolder:
+		m.actions = actionMenu{}
+		m.page, m.focus, m.lib.open, m.lib.filter = pageLibrary, focusContent, nil, libAll
+		return m.enterFolder(t.entry.key), nil
+	case actRenameFolder:
+		e := t.entry
+		return m.openFolderForm(&e), nil
 	}
 	m.actions = actionMenu{}
 
@@ -323,6 +399,9 @@ func (m Model) runAction(id actID) (Model, tea.Cmd) {
 		return m.note(T("act.copied")), tea.SetClipboard(spotify.WebLink(uri))
 	case actRadio:
 		return m.note(T("act.radio.making")), m.startRadio(uri)
+	case actEdit:
+		e := t.entry
+		return m.openPlaylistForm(&e, ""), nil
 	}
 	return m, nil
 }
@@ -408,14 +487,28 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) actionsView(w int) []string {
 	a := m.actions
+	if a.folderPick {
+		return m.folderPickView(w)
+	}
+	if a.confirm {
+		title, ask, note := T("act.delete.title"), T("act.delete.ask"), T("act.delete.recover")
+		if a.target.kind == kindFolder {
+			title, ask, note = T("act.delfolder"), T("act.delfolder.ask"), T("act.delfolder.note")
+		}
+		return []string{theme.Title.Render(title), theme.Dim.Render(truncate(a.target.name, w)), "", "",
+			theme.Plain.Render(ask), theme.Faint.Render(note), "",
+			"  " + theme.SelectedRow.Render(" "+T("act.delete.yes")+" ") + "   " + theme.Dim.Render(T("act.delete.no"))}
+	}
 	if a.picking {
 		rows := []string{theme.Title.Render(T("act.addlist.title")), theme.Dim.Render(truncate(a.target.name, w)), "", ""}
-		if len(a.lists) == 0 {
-			return append(rows, theme.Dim.Render(T("act.nolists")))
-		}
-		end := min(len(a.lists), a.plScroll+m.listHeight())
+		// İlk satır: yeni liste aç ve şarkıyı içine koy.
+		end := min(len(a.lists)+1, a.plScroll+m.listHeight())
 		for i := a.plScroll; i < end; i++ {
-			e := a.lists[i]
+			if i == 0 {
+				rows = append(rows, "  "+row("＋ "+T("act.newlist"), "", w-2, a.plCursor == 0))
+				continue
+			}
+			e := a.lists[i-1]
 			rows = append(rows, "  "+row(e.name, F("lib.songs", e.total), w-2, i == a.plCursor))
 		}
 		return rows

@@ -1,11 +1,18 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Ehtisam/sotto/internal/i18n"
+	"github.com/Ehtisam/sotto/internal/setup"
+	"github.com/Ehtisam/sotto/internal/soloist"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
 )
 
@@ -21,7 +28,13 @@ const (
 	setCovers
 	setLanguage
 	setAutostart
+	setResume
 	setVolume
+	setSoloist
+	setSoloistAuto
+	setNotify
+	setMedia
+	setStartMenu
 	setExtras
 	setAccount
 	setConfigFile
@@ -30,12 +43,18 @@ const (
 // settingNames, çeviri anahtarlarında kullanılan adlar (set.name.X, set.help.X).
 var settingNames = map[settingID]string{
 	setTheme: "theme", setAccent: "accent", setCovers: "covers", setLanguage: "language",
-	setAutostart: "autostart", setVolume: "volume", setExtras: "extras",
+	setAutostart: "autostart", setResume: "resume", setVolume: "volume", setSoloist: "soloist", setSoloistAuto: "soloistauto",
+	setNotify: "notify", setMedia: "media", setStartMenu: "startmenu", setExtras: "extras",
 	setAccount: "account", setConfigFile: "config",
 }
 
 type settingsState struct {
 	cursor int // settingRows içinde, yalnızca ayar satırları sayılır
+
+	build    *soloist.Build  // kurulu Soloist sürümü (nil: bilinmiyor)
+	buildErr error           // okunamadı / kurulu değil
+	updating *setup.Progress // Soloist indiriliyor
+	warned   bool            // süre uyarısı bu açılışta bir kez
 }
 
 // settingRow, sayfanın bir satırı: bölüm başlığı (id < 0) ya da ayar.
@@ -48,7 +67,9 @@ var settingRows = []settingRow{
 	{id: -1, section: "set.look"},
 	{id: setTheme}, {id: setAccent}, {id: setCovers}, {id: setLanguage},
 	{id: -1, section: "set.speaker"},
-	{id: setAutostart}, {id: setVolume},
+	{id: setAutostart}, {id: setResume}, {id: setVolume}, {id: setSoloist}, {id: setSoloistAuto},
+	{id: -1, section: "set.desktop"},
+	{id: setNotify}, {id: setMedia}, {id: setStartMenu},
 	{id: -1, section: "set.extras"},
 	{id: setExtras},
 	{id: -1, section: "set.account"},
@@ -132,6 +153,24 @@ func (m Model) settingValue(id settingID) string {
 		return T("set.autostart.off")
 	case setVolume:
 		return fmt.Sprintf("%d", c.Soloist.InitialVolume)
+	case setResume:
+		return onOff(c.Soloist.Resume)
+	case setSoloist:
+		return m.soloistValue()
+	case setSoloistAuto:
+		return onOff(c.Soloist.AutoUpdate)
+	case setNotify:
+		switch c.Desktop.Notify {
+		case "always":
+			return T("set.notify.always")
+		case "unfocused":
+			return T("set.notify.unfocused")
+		}
+		return T("set.off")
+	case setMedia:
+		return onOff(c.Desktop.MediaControls)
+	case setStartMenu:
+		return onOff(c.Desktop.StartMenu)
 	case setExtras:
 		return onOff(c.Extras.Enabled)
 	case setAccount, setConfigFile:
@@ -195,6 +234,39 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 		c.Soloist.Autostart = !c.Soloist.Autostart
 	case setVolume:
 		c.Soloist.InitialVolume = max(0, min(100, c.Soloist.InitialVolume+5*d))
+	case setResume:
+		c.Soloist.Resume = !c.Soloist.Resume
+	case setSoloist:
+		return m.updateSoloist(false)
+	case setSoloistAuto:
+		c.Soloist.AutoUpdate = !c.Soloist.AutoUpdate
+	case setNotify:
+		modes := []string{"unfocused", "always", "off"}
+		i := 0
+		for j, mode := range modes {
+			if mode == c.Desktop.Notify {
+				i = j
+			}
+		}
+		c.Desktop.Notify = modes[cycle(i, d, len(modes))]
+	case setStartMenu:
+		c.Desktop.StartMenu = !c.Desktop.StartMenu
+		if err := c.Save(); err != nil {
+			return m.say(err.Error()), nil
+		}
+		on := c.Desktop.StartMenu
+		return m.note(T("set.saved")), func() tea.Msg {
+			if err := SyncStartMenu(on); err != nil {
+				return flashMsg(err.Error())
+			}
+			return nil
+		}
+	case setMedia:
+		c.Desktop.MediaControls = !c.Desktop.MediaControls
+		if err := c.Save(); err != nil {
+			return m.say(err.Error()), nil
+		}
+		return m.note(T("set.saved")), m.setMediaControls(c.Desktop.MediaControls)
 	case setExtras:
 		c.Extras.Enabled = !c.Extras.Enabled
 		if !c.Extras.Enabled {
@@ -237,7 +309,7 @@ func (m Model) settingsKey(k string) (Model, tea.Cmd, bool) {
 		return mm, cmd, true
 	case "left":
 		id := m.settingSelected()
-		if id == setAccount || id == setConfigFile {
+		if id == setAccount || id == setConfigFile || id == setSoloist {
 			return m, nil, true // geri yönü olmayan satırlar
 		}
 		mm, cmd := m.change(id, -1)
@@ -250,32 +322,239 @@ func (m Model) settingsKey(k string) (Model, tea.Cmd, bool) {
 	return m, nil, true
 }
 
-func (m Model) settingsView(w int) []string {
+func (m Model) settingsView(w, h int) []string {
 	rows := []string{theme.Title.Render(T("page.settings")), theme.Dim.Render(T("set.sub")), ""}
+	ends := []bool{false, false, false} // satır bir ayar mı (başlık ya da boşluk değil)
 	active := m.focus == focusContent
 	sel := m.settingSelected()
 	for _, r := range settingRows {
 		if r.id < 0 {
 			if len(rows) > 3 {
-				rows = append(rows, "")
+				rows, ends = append(rows, ""), append(ends, false)
 			}
-			rows = append(rows, theme.Dim.Italic(true).Render(T(r.section)))
+			rows, ends = append(rows, theme.Dim.Italic(true).Render(T(r.section))), append(ends, false)
 			continue
 		}
 		value := m.settingValue(r.id)
 		selected := active && r.id == sel
-		if selected && r.id != setAccount && r.id != setConfigFile {
+		if selected && r.id != setAccount && r.id != setConfigFile && r.id != setSoloist {
 			value = "‹ " + value + " ›"
 		}
 		line := "  " + row(T("set.name."+settingNames[r.id]), value, w-8, selected)
 		if sw := m.settingSwatch(r.id); sw != "" {
 			line += "  " + sw
 		}
-		rows = append(rows, line)
+		rows, ends = append(rows, line), append(ends, true)
 	}
 	// Seçili ayarın kısa açıklaması.
+	var help []string
 	if key := "set.help." + settingNames[sel]; T(key) != key {
-		rows = append(rows, "", theme.Faint.Render(truncate(T(key), w)))
+		help = []string{"", theme.Faint.Render(truncate(T(key), w))}
 	}
-	return rows
+	// Pencereye sığmıyorsa seçili satır görünecek kadar kaydır (başlık kalır).
+	if room := h - len(help) - 3; h > 0 && len(rows)-3 > room && room > 2 {
+		selRow := 0
+		for i, r := range rows[3:] {
+			if strings.Contains(r, T("set.name."+settingNames[sel])) {
+				selRow = i
+				break
+			}
+		}
+		body, isSet := rows[3:], ends[3:]
+		start := max(0, min(selRow-room/2, len(body)-room))
+		end := start + room
+		// Kesilen yerde bölüm başlığı altı boş kalmasın: sondaki başlık ve
+		// boşluklar atılır (o bölüm aşağı kayınca bütün olarak görünür).
+		for end > start+1 && !isSet[end-1] {
+			end--
+		}
+		for start < end-1 && body[start] == "" {
+			start++
+		}
+		rows = append(rows[:3:3], body[start:end]...)
+	}
+	return append(rows, help...)
 }
+
+// ---- Soloist sürümü ve güncelleme ----
+
+type soloistBuildMsg struct {
+	build soloist.Build
+	err   error
+}
+
+// soloistUpdatedMsg: indirme bitti. newer: indirilen daha yeniydi ve yerine kondu.
+type soloistUpdatedMsg struct {
+	build soloist.Build
+	newer bool
+	auto  bool
+	err   error
+}
+
+func (m Model) readSoloistBuild() tea.Cmd {
+	path := m.cfg.SoloistPath()
+	return func() tea.Msg {
+		if _, err := os.Stat(path); err != nil {
+			return soloistBuildMsg{err: err}
+		}
+		b, err := readBuild(context.Background(), path)
+		return soloistBuildMsg{b, err}
+	}
+}
+
+// expiryWarnDays: süresine bu kadar gün kalınca uyarılır ya da (ayar açıksa) güncellenir.
+const expiryWarnDays = 14
+
+func (m Model) soloistValue() string {
+	if p := m.set.updating; p != nil {
+		pct := 0
+		if t := p.Total.Load(); t > 0 {
+			pct = int(100 * p.Done.Load() / t)
+		}
+		return fmt.Sprintf(T("set.soloist.dl"), pct)
+	}
+	if m.set.build == nil {
+		if m.set.buildErr != nil {
+			return T("set.soloist.none")
+		}
+		return "…"
+	}
+	b := m.set.build
+	if left := b.DaysLeft(m.now); left > 0 {
+		return fmt.Sprintf(T("set.soloist.left"), shortVersion(b.Version), left)
+	}
+	return fmt.Sprintf(T("set.soloist.expired"), shortVersion(b.Version))
+}
+
+// shortVersion: "1.3.10.87" → "1.3.10".
+func shortVersion(v string) string {
+	n := 0
+	for i, r := range v {
+		if r == '.' {
+			if n++; n == 3 {
+				return v[:i]
+			}
+		}
+	}
+	return v
+}
+
+func (m Model) updateSettingsMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case soloistBuildMsg:
+		if msg.err != nil {
+			m.set.build, m.set.buildErr = nil, msg.err
+			return m, nil
+		}
+		b := msg.build
+		m.set.build, m.set.buildErr = &b, nil
+		left := b.DaysLeft(m.now)
+		if left > expiryWarnDays || m.set.updating != nil {
+			return m, nil
+		}
+		// Süre yaklaştı: ayar açıksa yeni sürümü arka planda indir (günde en çok
+		// bir kez; süresi dolduysa hemen), değilse bir kez uyar.
+		if m.cfg.Soloist.AutoUpdate {
+			if left <= 0 || m.now.Sub(soloist.CheckedSince(m.cfg.SoloistPath())) > 20*time.Hour {
+				m.set.warned = true
+				mm, cmd := m.updateSoloist(true)
+				if left <= 0 {
+					return mm.note(T("flash.soloist.autoexpired")), cmd
+				}
+				return mm.note(fmt.Sprintf(T("flash.soloist.autoupdating"), left)), cmd
+			}
+			return m, nil // bugün bakıldı, yeni sürüm yoktu
+		}
+		if !m.set.warned {
+			m.set.warned = true
+			if left <= 0 {
+				return m.say(T("flash.soloist.expired")), nil
+			}
+			return m.say(fmt.Sprintf(T("flash.soloist.expiring"), left)), nil
+		}
+
+	case soloistUpdatedMsg:
+		m.set.updating = nil
+		if msg.err != nil {
+			return m.say(fmt.Sprintf(T("flash.soloist.updatefail"), msg.err)), nil
+		}
+		if !msg.newer {
+			if msg.auto {
+				if m.set.build != nil && m.set.build.DaysLeft(m.now) <= 0 {
+					return m.say(T("flash.soloist.nonew")), nil
+				}
+				return m, nil // sessizce yarın yeniden bakılır
+			}
+			return m.note(T("set.soloist.latest")), nil
+		}
+		b := msg.build
+		m.set.build, m.set.buildErr = &b, nil
+		if m.rt.proc != nil { // çalışan Soloist eski sürümle devam eder, müzik kesilmez
+			return m.note(T("set.soloist.ready")), nil
+		}
+		m = m.note(T("set.soloist.updated"))
+		if m.engine == engineFailed && (m.cfg.Soloist.Autostart || errors.Is(m.engineErr, soloist.ErrExpired)) {
+			m.engine, m.engineErr = engineStarting, nil
+			return m, startSoloist(m.cfg)
+		}
+	}
+	return m, nil
+}
+
+// updateSoloist, Spotify'ın yayımladığı en yeni Soloist'i resmî adresten
+// çalışanın yanına indirir; daha yeniyse yerine koyar. Çalışan Soloist
+// durdurulmaz: eski sürümle devam eder, bir sonraki başlatışta yenisi açılır.
+func (m Model) updateSoloist(auto bool) (Model, tea.Cmd) {
+	if m.set.updating != nil {
+		return m, nil
+	}
+	url, err := setup.SoloistURL()
+	if err != nil {
+		if auto {
+			return m, nil
+		}
+		return m.say(T("wiz.dl.unsupported")), nil
+	}
+	p := &setup.Progress{}
+	m.set.updating = p
+	exe := m.cfg.SoloistPath()
+	var cur *soloist.Build
+	if m.set.build != nil {
+		b := *m.set.build
+		cur = &b
+	}
+	cmd := func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		soloist.MarkChecked(exe, time.Now())
+		staged := soloist.StagedPath(exe)
+		if err := downloadSoloist(ctx, url, setup.ExeName("soloist"), staged, p); err != nil {
+			_ = os.Remove(staged)
+			return soloistUpdatedMsg{auto: auto, err: err}
+		}
+		nb, err := readBuild(ctx, staged)
+		if err != nil {
+			_ = os.Remove(staged)
+			return soloistUpdatedMsg{auto: auto, err: err}
+		}
+		if cur != nil && !nb.Built.After(cur.Built) {
+			_ = os.Remove(staged)
+			return soloistUpdatedMsg{build: nb, auto: auto}
+		}
+		if err := soloist.Swap(exe); err != nil {
+			_ = os.Remove(staged)
+			return soloistUpdatedMsg{auto: auto, err: err}
+		}
+		return soloistUpdatedMsg{build: nb, newer: true, auto: auto}
+	}
+	if !auto {
+		m = m.note(T("set.soloist.updating"))
+	}
+	return m, cmd
+}
+
+// Testlerde değiştirilir.
+var (
+	downloadSoloist = setup.Fetch
+	readBuild       = soloist.ReadBuild
+)

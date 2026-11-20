@@ -8,13 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-const apiBase = "https://api.spotify.com/v1/"
+// apiBase: testler değiştirir.
+var apiBase = "https://api.spotify.com/v1/"
 
 // ErrNotLoggedIn: kayıtlı giriş yok ya da Spotify onu geçersiz saydı.
 var ErrNotLoggedIn = errors.New("spotify account is not connected")
@@ -53,6 +55,8 @@ type Client struct {
 
 	cacheMu sync.Mutex
 	tracks  map[string]Track
+
+	cache *apiCache // yanıt önbelleği ve istek sınırı (cache.go)
 }
 
 func NewClient(clientID, tokenPath string) *Client {
@@ -61,6 +65,10 @@ func NewClient(clientID, tokenPath string) *Client {
 		tokenPath: tokenPath,
 		http:      &http.Client{Timeout: 20 * time.Second},
 		tracks:    map[string]Track{},
+		cache:     newAPICache(""),
+	}
+	if tokenPath != "" {
+		c.cache = newAPICache(filepath.Join(filepath.Dir(tokenPath), "api-cache"))
 	}
 	if t, err := loadToken(tokenPath); err == nil {
 		c.tok = t
@@ -101,6 +109,15 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	if c.clientID == "" {
 		return "", ErrNoClientID
 	}
+	// Başka bir sotto (ör. komut satırı) jetonu yenilemiş olabilir: Spotify
+	// yenileme anahtarını değiştirebildiği için önce dosyadakine bak.
+	if disk, err := loadToken(c.tokenPath); err == nil && disk.RefreshToken != "" &&
+		(disk.fresh() || disk.RefreshToken != c.tok.RefreshToken) {
+		c.tok = disk
+		if c.tok.fresh() {
+			return c.tok.AccessToken, nil
+		}
+	}
 	if c.tok.RefreshToken == "" {
 		return "", ErrNotLoggedIn
 	}
@@ -130,11 +147,40 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 // istediği kadar (en çok 10 sn) bekleyip yeniden dener.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	var payload []byte
+	ctype := ""
 	if body != nil {
 		var err error
 		if payload, err = json.Marshal(body); err != nil {
 			return err
 		}
+		ctype = "application/json"
+	}
+	return c.doRaw(ctx, method, path, ctype, payload, out)
+}
+
+// doRaw, gövdesi hazır bir istek gönderir (örn. kapak resmi).
+func (c *Client) doRaw(ctx context.Context, method, path, ctype string, payload []byte, out any) error {
+	decode := func(data []byte) error {
+		if out != nil && len(bytes.TrimSpace(data)) > 0 {
+			return json.Unmarshal(data, out)
+		}
+		return nil
+	}
+	cacheable := method == http.MethodGet && payload == nil && cacheTTL(path) > 0
+	now := time.Now()
+	if cacheable && !isFresh(ctx) {
+		if e, ok, valid := c.cache.get(path, now); ok && valid {
+			return decode(e.Data)
+		}
+	}
+	// Spotify bir süreliğine sınırladıysa istek gönderilmez; eldeki kayıt (eski de olsa) verilir.
+	if until := c.cache.blockedUntil(path, now); !until.IsZero() {
+		if cacheable {
+			if e, ok, _ := c.cache.get(path, now); ok {
+				return decode(e.Data)
+			}
+		}
+		return &RateLimitError{Until: until}
 	}
 	for attempt := 0; ; attempt++ {
 		at, err := c.accessToken(ctx)
@@ -146,8 +192,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 			return err
 		}
 		req.Header.Set("Authorization", "Bearer "+at)
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
+		if ctype != "" {
+			req.Header.Set("Content-Type", ctype)
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
@@ -158,21 +204,34 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 
 		switch {
 		case resp.StatusCode >= 200 && resp.StatusCode < 300:
-			if out != nil && len(bytes.TrimSpace(data)) > 0 {
-				return json.Unmarshal(data, out)
+			if cacheable {
+				c.cache.put(path, data, time.Now())
+			} else if method != http.MethodGet {
+				c.cache.invalidate() // bir şey değişti: listeler, kitaplık yeniden sorulsun
 			}
-			return nil
+			return decode(data)
 		case resp.StatusCode == http.StatusUnauthorized && attempt == 0:
 			c.expireAccess()
 			continue
-		case resp.StatusCode == http.StatusTooManyRequests && attempt < 3:
+		case resp.StatusCode == http.StatusTooManyRequests:
 			wait, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
-			wait = max(1, min(wait, 10))
-			select {
-			case <-time.After(time.Duration(wait) * time.Second):
-				continue
-			case <-ctx.Done():
-				return ctx.Err()
+			if wait > 10 { // uzun sınır: beklemek boşuna; saati hatırla
+				until := time.Now().Add(time.Duration(wait) * time.Second)
+				c.cache.block(path, until)
+				if cacheable {
+					if e, ok, _ := c.cache.get(path, now); ok {
+						return decode(e.Data)
+					}
+				}
+				return &RateLimitError{Until: until}
+			}
+			if attempt < 3 {
+				select {
+				case <-time.After(time.Duration(max(1, wait)) * time.Second):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 		}
 		var e struct {

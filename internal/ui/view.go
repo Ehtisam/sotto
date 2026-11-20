@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Ehtisam/sotto/internal/cli"
 	"github.com/Ehtisam/sotto/internal/i18n"
 	"github.com/Ehtisam/sotto/internal/soloist"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
@@ -26,9 +27,16 @@ var T, F = i18n.T, i18n.F
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
+	v.ReportFocus = true // bildirimler yalnızca pencere arkadayken (ayara göre)
 	v.BackgroundColor = theme.Ground
 	v.ForegroundColor = theme.Text
 	v.WindowTitle = m.windowTitle()
+	// Terminalden tuşların basılma/bırakılma bilgisini iste (kitty klavye
+	// protokolü): böylece shift'e tek başına basıldığı duyulur ve alt satır
+	// shift'le çalışan tuşları gösterir. Desteklemeyen terminal yok sayar.
+	v.KeyboardEnhancements.ReportEventTypes = true
+	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+	v.KeyboardEnhancements.ReportAssociatedText = true
 	return v
 }
 
@@ -48,12 +56,18 @@ func (m Model) render() string {
 	if w <= 0 || h <= 0 {
 		return ""
 	}
+	m.rt.gfx.slots = nil // coverBox resim alanlarını yeniden ayırır
+	if m.miniMode() {    // pencere çok küçük: yalnızca çalan şarkı (mini.go)
+		screen := m.miniView()
+		m.rt.gfx.placed = findPlaces(screen, m.rt.gfx.slots)
+		m.rt.out.setAfter(m.stripsAfter(screen))
+		return screen
+	}
 	rule := theme.Faint.Render(strings.Repeat("─", w))
 
 	// Sabit satırlar: başlık, çizgi, çizgi, şerit (2), boş, kısayollar.
 	bodyH := max(h-7, 1)
 
-	m.rt.gfx.slots = nil // coverBox resim alanlarını yeniden ayırır
 	screen := strings.Join([]string{
 		m.header(w),
 		rule,
@@ -142,17 +156,28 @@ func (m Model) menu(h int) string {
 		}
 	}
 	// Çalan şarkının kapağı menünün altında; Şimdi çalıyor sayfasında zaten büyüğü var.
-	const cw, ch = menuWidth - 2, (menuWidth - 2) / 2
-	if url := m.nowCoverURL(); url != "" && m.page != pageNow && !m.help && h >= len(rows)+ch+3 {
+	// Yer azsa kapak küçülür (en çok 18×9, en az 8×4); albüm adı sığarsa altında.
+	ch := menuCoverRows(h, len(rows))
+	if url := m.nowCoverURL(); url != "" && m.page != pageNow && !m.help && ch > 0 {
 		rows = append(rows, "")
-		for _, l := range strings.Split(m.coverBox(url, cw, ch), "\n") {
+		for _, l := range strings.Split(m.coverBox(url, ch*2, ch), "\n") {
 			rows = append(rows, " "+l)
 		}
-		if _, _, album := m.describe(m.state.Item); album != "" {
-			rows = append(rows, " "+theme.Dim.Italic(true).Render(truncate(album, cw)))
+		if _, _, album := m.describe(m.state.Item); album != "" && len(rows) < h {
+			rows = append(rows, " "+theme.Dim.Italic(true).Render(truncate(album, menuWidth-2)))
 		}
 	}
 	return lipgloss.NewStyle().Width(menuWidth).Height(h).MaxHeight(h).Render(strings.Join(rows, "\n"))
+}
+
+// menuCoverRows, menünün altındaki kapağın satır sayısı: used satırdan sonra
+// kalan yere sığan en büyüğü (en çok 9), 4'ten azsa 0 (kapak yok).
+func menuCoverRows(h, used int) int {
+	ch := min((menuWidth-2)/2, h-used-1)
+	if ch < 4 {
+		return 0
+	}
+	return ch
 }
 
 func (m Model) content(w, h int) string {
@@ -160,6 +185,8 @@ func (m Model) content(w, h int) string {
 	switch {
 	case m.wiz.on:
 		rows = m.wizardView(w)
+	case m.form.on:
+		rows = m.playlistFormView(w)
 	case m.actions.open:
 		rows = m.actionsView(w)
 	case m.help:
@@ -179,7 +206,7 @@ func (m Model) content(w, h int) string {
 	case m.page == pageProfile:
 		rows = m.profileView(w)
 	case m.page == pageSettings:
-		rows = m.settingsView(w)
+		rows = m.settingsView(w, h)
 	default:
 		p := pages[m.page]
 		rows = []string{
@@ -205,10 +232,18 @@ func (m Model) nowPlaying(w, h int) []string {
 		if msg := m.engineMessage(); len(msg) > 0 && !m.remote.active {
 			return append(head, msg...)
 		}
-		return append(head,
+		rows := append(head,
 			theme.Dim.Render(T("now.nothing")),
 			theme.Faint.Render(T("now.nothing.how")),
 		)
+		if l := m.rt.ev.last; l.Track != "" && l.Title != "" && m.spState == spReady {
+			what := l.Title
+			if l.Artist != "" {
+				what += " — " + l.Artist
+			}
+			rows = append(rows, "", theme.Faint.Render(T("now.resume"))+theme.Plain.Render(what))
+		}
+		return rows
 	}
 
 	// Kapak kare: satırın iki katı sütun. Bilgiye en az 32 sütun bırak.
@@ -397,7 +432,14 @@ func (m Model) strip(w int) string {
 
 	// İlerleme çubuğu, süre, ses, karıştır, tekrar.
 	pos, dur := m.position(), it.Duration()
-	extras := theme.Faint.Render(T("strip.vol")) + theme.Plain.Render(fmt.Sprint(m.state.Volume)) + "  " + m.shuffleMark() + " " + m.repeatMark()
+	vol := theme.Plain.Render(fmt.Sprint(m.state.Volume))
+	if m.remote.active && cli.Disallowed(m.remote.player, "volume", "") {
+		vol = theme.Faint.Render(fmt.Sprint(m.state.Volume)) // cihaz uzaktan ses değiştirtmiyor
+	}
+	extras := theme.Faint.Render(T("strip.vol")) + vol + "  " + m.shuffleMark() + " " + m.repeatMark()
+	if s := m.sleepMark(); s != "" {
+		extras += "  " + s
+	}
 	left := theme.Dim.Render(clock(pos)) + " "
 	rightTime := " " + theme.Dim.Render(clock(dur))
 	barW := inner - lipgloss.Width(left) - lipgloss.Width(rightTime) - lipgloss.Width(extras)
@@ -442,10 +484,25 @@ type hint struct{ key, verb string }
 
 func (m Model) hints(w int) string {
 	var hs []hint
+	if m.shiftHeld() {
+		r := func(h hint) string { return theme.Hi.Render(h.key) + " " + theme.Dim.Render(h.verb) }
+		if row := m.shiftHintRow(r); row != "" {
+			return ansi.Truncate(strings.Repeat(" ", margin)+row, w, "…")
+		}
+	}
 	if m.wiz.on {
 		parts := []string{}
 		for _, h := range m.wizardHints() {
 			parts = append(parts, theme.Dim.Render(h.key)+" "+theme.Faint.Render(h.verb))
+		}
+		return ansi.Truncate(strings.Repeat(" ", margin)+strings.Join(parts, theme.Faint.Render(" · ")), w, "…")
+	}
+	if m.form.on {
+		// Formda harfler yazıya gider; çalma kısayolları burada çalışmaz.
+		hs = []hint{{"↑ ↓", T("hint.select")}, {T("hint.type"), T("hint.edit")}, {"← →", T("hint.change")}, {"ctrl+s", T("pl.save")}, {"esc", T("hint.close")}}
+		parts := make([]string, len(hs))
+		for i, h := range hs {
+			parts[i] = theme.Dim.Render(h.key) + " " + theme.Faint.Render(h.verb)
 		}
 		return ansi.Truncate(strings.Repeat(" ", margin)+strings.Join(parts, theme.Faint.Render(" · ")), w, "…")
 	}
@@ -465,7 +522,10 @@ func (m Model) hints(w int) string {
 		hs = []hint{{"↑ ↓", T("hint.select")}, {"enter", T("hint.play")}}
 		switch {
 		case m.page == pageLibrary && m.lib.open == nil:
-			hs = append(hs, hint{"tab", T("hint.filter")})
+			hs = append(hs, hint{"tab", T("hint.filter")}, hint{"n", T("hint.newlist")})
+			if m.cfg.Extras.Enabled {
+				hs = append(hs, hint{"f", T("folder.hint")})
+			}
 		case m.page == pageProfile && m.prof.open == nil:
 			hs = append(hs, hint{"tab", T("hint.nextlist")})
 		case m.page == pageSettings:
@@ -512,7 +572,7 @@ func (m Model) helpView(w int) []string {
 		{"tab", "help.tab"}, {"shift+tab", "help.backtab"}, {"1 – 8", "help.pages"}, {"", ""},
 		{T("key.space"), "help.pause"}, {"n  p", "help.skip"}, {",  .", "help.seek"},
 		{"+  −", "help.vol"}, {"s", "help.shuf"}, {"r", "help.rep"}, {"", ""},
-		{"a", "help.actions"}, {"t", "help.switch"}, {"o", "help.solo"}, {"l", "help.lyrics"}, {"L", "help.lyrlogin"}, {"", ""},
+		{"a", "help.actions"}, {"t", "help.switch"}, {"o", "help.solo"}, {"l", "help.lyrics"}, {"L", "help.lyrlogin"}, {"z", "help.sleep"}, {"N", "help.newlist"}, {"f", "help.folder"}, {"", ""},
 		{"/", "help.search"}, {"?", "help.keys"}, {"q", "help.quit"},
 	}
 	rows := []string{theme.Title.Render(T("help.title")), ""}

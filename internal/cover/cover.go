@@ -196,3 +196,23 @@ func key(url string) string {
 	h := sha1.Sum([]byte(url))
 	return hex.EncodeToString(h[:])
 }
+
+// File, kapağın diskteki kopyasını .jpg adıyla verir (bildirimlerde
+// kullanılır); gerekirse önce indirir.
+func (s *Store) File(ctx context.Context, url string) (string, error) {
+	if url == "" {
+		return "", fmt.Errorf("cover: no url")
+	}
+	jpg := filepath.Join(s.dir, key(url)+".jpg")
+	if _, err := os.Stat(jpg); err == nil {
+		return jpg, nil
+	}
+	if err := s.Fetch(ctx, url); err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(s.dir, key(url)+".img"))
+	if err != nil {
+		return "", err
+	}
+	return jpg, os.WriteFile(jpg, data, 0o600)
+}

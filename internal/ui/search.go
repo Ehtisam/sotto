@@ -45,6 +45,9 @@ type searchItem struct {
 	entry   libEntry // album, playlist ve show açılırken
 	section string   // header satırları için
 	skip    int      // sıra sayfası: bu şarkıya kaç atlamayla gelinir (-1: çalan şarkı)
+	// history: bağlam Spotify'ın son çalınanlar kaydından geliyor; güvenilmez
+	// (otomatik devamda çalınan şarkılar da listenin adıyla kaydediliyor).
+	history bool
 }
 
 type searchState struct {
@@ -63,6 +66,8 @@ type searchState struct {
 	scroll int
 
 	open *trackList
+
+	recent []savedSearch // son aramalar (recent.go)
 }
 
 type searchFireMsg struct{ seq int }
@@ -86,7 +91,10 @@ func (m Model) scheduleSearch() (Model, tea.Cmd) {
 func (m Model) runSearch(offset int) (Model, tea.Cmd) {
 	q := strings.TrimSpace(m.search.query)
 	if q == "" {
-		m.search.items, m.search.last, m.search.err = nil, "", nil
+		// Kutu boş: son aramalar.
+		m.search.items, m.search.last, m.search.err = m.recentItems(), "", nil
+		m.search.loading = false // yolda olan eski arama artık önemsiz
+		m.search.total, m.search.cursor, m.search.scroll = 0, nextSelectable(m.search.items, 0, 1), 0
 		return m, nil
 	}
 	if offset == 0 {
@@ -268,12 +276,19 @@ func nextSelectable(items []searchItem, i, dir int) int {
 func (m Model) actOn(it searchItem) (*trackList, tea.Cmd) {
 	switch it.kind {
 	case "track":
+		album := ""
+		if it.track != nil {
+			album = it.track.Album.URI
+		}
 		ctx := it.ctx
-		if ctx == "" && it.track != nil {
-			ctx = it.track.Album.URI
+		if ctx == "" {
+			ctx = album
 		}
 		if ctx == "" {
 			return nil, m.playOne(it.uri)
+		}
+		if it.history && ctx != album {
+			return nil, m.playFromHistory(ctx, it.uri, album)
 		}
 		return nil, m.playContext(ctx, it.uri)
 	case "album", "playlist", "show", "liked":
@@ -284,6 +299,28 @@ func (m Model) actOn(it searchItem) (*trackList, tea.Cmd) {
 		return nil, m.playOne(it.uri)
 	}
 	return nil, nil
+}
+
+// playFromHistory, son çalınanlardan bir şarkıyı kaydedilen bağlamında çalar;
+// şarkı o bağlamda değilse (otomatik devamla çalınmış) ya da bağlam bir
+// sanatçıysa (Spotify sanatçıyı bir şarkıdan başlatmıyor) albümünden çalar.
+// Yoksa Spotify isteği kabul edip hiçbir şey çalmıyor, çalan şarkı da duruyor.
+func (m Model) playFromHistory(ctxURI, uri, album string) tea.Cmd {
+	return m.playOn(func(c context.Context, sp *spotify.Client, id string) error {
+		use := ctxURI
+		switch {
+		case strings.HasPrefix(ctxURI, "spotify:artist:"):
+			use = album
+		case strings.HasPrefix(ctxURI, "spotify:playlist:"):
+			if has, err := sp.PlaylistHas(c, spotify.IDFromURI(ctxURI), uri); err != nil || !has {
+				use = album
+			}
+		}
+		if use == "" {
+			return sp.PlayTracks(c, id, []string{uri}, "")
+		}
+		return sp.PlayContext(c, id, use, uri)
+	})
 }
 
 func (m Model) playOne(uri string) tea.Cmd {
@@ -336,6 +373,9 @@ func (m Model) enterSearch() Model {
 	if m.search.open == nil {
 		m.search.typing = true
 	}
+	if strings.TrimSpace(m.search.query) == "" {
+		m.search.items = m.recentItems()
+	}
 	return m
 }
 
@@ -371,9 +411,10 @@ func (m Model) searchKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		switch k {
 		case "esc":
 			if s.query != "" {
+				// Hemen boş kutuya geç (son aramalar); beklenirse aynı sözcük
+				// yeniden yazılınca "zaten arandı" sanılıp boş liste kalıyordu.
 				s.query = ""
-				s.items = nil
-				mm, cmd := m.scheduleSearch()
+				mm, cmd := m.runSearch(0)
 				return mm, cmd, true
 			}
 			m.focus = focusMenu
@@ -393,6 +434,8 @@ func (m Model) searchKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 			}
 		case "ctrl+u":
 			s.query = ""
+			mm, cmd := m.runSearch(0)
+			return mm, cmd, true
 		case "ctrl+c":
 			return m, nil, false
 		default:
@@ -431,11 +474,25 @@ func (m Model) searchKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 			s.typing = true
 			return m, nil, true
 		}
-		tl, cmd := m.actOn(s.items[s.cursor])
+		it := s.items[s.cursor]
+		tl, cmd := m.actOn(it)
 		if tl != nil {
 			s.open = tl
 		}
-		return m, cmd, true
+		mm, scmd := m.rememberSearch(it)
+		return mm, tea.Batch(cmd, scmd), true
+	case "x", "delete":
+		// Kutu boşken listelenen son aramalardan birini siler.
+		if strings.TrimSpace(s.query) != "" || len(s.items) == 0 {
+			return m, nil, true
+		}
+		mm, cmd := m.forgetSearch(s.items[s.cursor].uri)
+		mm.search.items = mm.recentItems()
+		mm.search.cursor = nextSelectable(mm.search.items, min(s.cursor, len(mm.search.items)-1), -1)
+		if len(mm.search.items) == 0 {
+			mm.search.typing = true
+		}
+		return mm, cmd, true
 	case "esc", "left", "backspace":
 		m.focus = focusMenu
 	default:
@@ -488,10 +545,10 @@ func (m Model) searchView(w int) []string {
 	switch {
 	case s.err != nil:
 		return append(rows, theme.Error.Render(s.err.Error()))
+	case strings.TrimSpace(s.query) == "" && len(s.items) == 0:
+		return append(rows, theme.Faint.Render(T("search.empty")))
 	case s.loading && len(s.items) == 0:
 		return append(rows, theme.Dim.Render(T("lib.loading")))
-	case strings.TrimSpace(s.query) == "":
-		return append(rows, theme.Faint.Render(T("search.empty")))
 	case len(s.items) == 0 && s.last != "":
 		return append(rows, theme.Dim.Render(T("search.none")))
 	}
