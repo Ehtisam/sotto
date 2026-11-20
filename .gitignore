@@ -1,0 +1,8 @@
+# derleme çıktıları
+*.exe
+/sotto
+/dist/
+
+# yerel denemeler
+*.log
+*.key
