@@ -1,16 +1,16 @@
 //go:build linux
 
-package soloist
+package proc
 
 import (
 	"os/exec"
 	"syscall"
 )
 
-// detach, Soloist'i ayrı bir süreç grubunda başlatır ve sotto ölürse onun da
+// Detach, programı ayrı bir süreç grubunda başlatır ve sotto ölürse onun da
 // ölmesini çekirdekten ister (Pdeathsig).
-func detach(cmd *exec.Cmd) {
+func Detach(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 }
 
-func bindToParent(int) error { return nil }
+func BindToParent(int) error { return nil }

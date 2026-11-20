@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Ehtisam/sotto/internal/proc"
 )
 
 // Soloist'in belgelenmiş çıkış kodları.
@@ -115,13 +117,13 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 	cmd := exec.Command(o.Path, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	detach(cmd)
+	proc.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		return nil, fmt.Errorf("could not start soloist: %w", err)
 	}
 
-	_ = bindToParent(cmd.Process.Pid) // olmazsa da sotto kapanırken Stop ile kapatılır
+	_ = proc.BindToParent(cmd.Process.Pid) // olmazsa da sotto kapanırken Stop ile kapatılır
 
 	p := &Process{cmd: cmd, logFile: logFile, done: make(chan struct{})}
 	go func() {

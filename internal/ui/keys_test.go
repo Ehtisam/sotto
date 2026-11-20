@@ -67,3 +67,18 @@ func TestSlashOpensSearch(t *testing.T) {
 		t.Fatal("/ should open search with the input focused")
 	}
 }
+
+func TestLyricsKeyGoesToNowPlaying(t *testing.T) {
+	dir := t.TempDir()
+	m := New(config.Config{ConfigDir: dir, LocalDir: dir})
+	m.page, m.focus = pageLibrary, focusContent
+	m.lyr.showQueue = true
+	m = press(m, "l", 'l')
+	if m.page != pageNow || m.lyr.showQueue {
+		t.Fatal("l should open the lyrics on Now playing")
+	}
+	m = press(m, "l", 'l')
+	if !m.lyr.showQueue {
+		t.Fatal("second l should switch to up next")
+	}
+}

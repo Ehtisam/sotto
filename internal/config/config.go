@@ -23,6 +23,7 @@ type Config struct {
 	Language string  `toml:"language"`
 	Spotify  Spotify `toml:"spotify"`
 	Soloist  Soloist `toml:"soloist"`
+	Extras   Extras  `toml:"extras"`
 
 	// Doldurulan yollar (dosyada yok).
 	ConfigDir string `toml:"-"`
@@ -31,6 +32,11 @@ type Config struct {
 
 type Spotify struct {
 	ClientID string `toml:"client_id"`
+}
+
+// Extras: Spotify'ın resmî olmayan iç bağlantılarıyla gelen özellikler (✱).
+type Extras struct {
+	Enabled bool `toml:"enabled"`
 }
 
 type Soloist struct {
@@ -45,7 +51,7 @@ type Soloist struct {
 }
 
 func defaults() Config {
-	return Config{Language: "en", Soloist: Soloist{Autostart: true, DeviceName: "sotto", InitialVolume: 40}}
+	return Config{Language: "en", Soloist: Soloist{Autostart: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true}}
 }
 
 // Load, ayar dosyasını okur. Dosya yoksa açıklamalı bir tane yazar.
@@ -73,6 +79,12 @@ func Load() (Config, error) {
 	default:
 		if err := toml.Unmarshal(b, &c); err != nil {
 			return c, fmt.Errorf("%s: %w", c.ConfigFile(), err)
+		}
+		// Yeni sürümle gelen bölümler dosyada yoksa açıklamalarıyla eklensin.
+		for _, section := range []string{"[spotify]", "[soloist]", "[extras]"} {
+			if !strings.Contains(string(b), section) {
+				exists = false
+			}
 		}
 	}
 	if c.Soloist.Enabled != nil {
@@ -124,6 +136,7 @@ func (c Config) Save() error {
 		quote(c.Soloist.Path),
 		quote(c.Soloist.DeviceName),
 		c.Soloist.InitialVolume,
+		c.Extras.Enabled,
 	)
 	return os.WriteFile(c.ConfigFile(), []byte(text), 0o600)
 }
@@ -150,6 +163,12 @@ path = %s
 # Name shown in Spotify's device list.
 device_name = %s
 initial_volume = %d
+
+[extras]
+# Features that use Spotify's unofficial routes, like Spotify's own lyrics.
+# They start go-librespot for a few seconds about once an hour to get a key.
+# Turn this off to use only official routes (lyrics then come from LRCLIB).
+enabled = %t
 `
 
 // quote, bir metni TOML dizgisi olarak yazar.

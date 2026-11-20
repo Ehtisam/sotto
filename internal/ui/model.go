@@ -11,9 +11,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ehtisam/sotto/internal/bridge"
 	"github.com/Ehtisam/sotto/internal/config"
 	"github.com/Ehtisam/sotto/internal/cover"
 	"github.com/Ehtisam/sotto/internal/i18n"
+	"github.com/Ehtisam/sotto/internal/lyrics"
 	"github.com/Ehtisam/sotto/internal/soloist"
 	"github.com/Ehtisam/sotto/internal/spotify"
 )
@@ -83,6 +85,10 @@ type shared struct {
 
 	covers     *cover.Store
 	coverAsked map[string]bool
+
+	bridge      *bridge.Bridge
+	lyrics      map[string]*lyrics.Lyrics // URI -> sözler (nil: bulunamadı)
+	lyricsAsked map[string]bool
 }
 
 // Model, sotto'nun bütün arayüz durumu.
@@ -116,6 +122,7 @@ type Model struct {
 	home   homeState
 	devs   deviceList
 	help   bool // ? ile açılan kısayol listesi
+	lyr    lyricsState
 
 	flash     string
 	flashAt   time.Time
@@ -129,6 +136,8 @@ func New(cfg config.Config) Model {
 		rt: &shared{
 			known: map[string]spotify.Track{}, pending: map[string]bool{},
 			covers: cover.NewStore(filepath.Join(cfg.LocalDir, "covers")), coverAsked: map[string]bool{},
+			bridge: bridge.New(filepath.Join(cfg.LocalDir, "bridge")),
+			lyrics: map[string]*lyrics.Lyrics{}, lyricsAsked: map[string]bool{},
 		},
 		sp:  spotify.NewClient(cfg.Spotify.ClientID, cfg.TokenFile()),
 		now: time.Now(),
@@ -153,6 +162,7 @@ func New(cfg config.Config) Model {
 
 // Shutdown, sotto'nun başlattığı Soloist'i ve bağlantıyı kapatır.
 func (m Model) Shutdown() {
+	m.rt.bridge.Close()
 	if m.rt.client != nil {
 		m.rt.client.Close()
 	}
@@ -343,13 +353,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = ""
 		}
 		var cmd, dcmd tea.Cmd
+		m = m.lyricsTick()
 		m, cmd = m.maybePoll()
 		if m.page == pageDevices && !m.devs.loading && m.now.Sub(m.devs.fetched) > 5*time.Second {
 			if dcmd = m.loadDevices(); dcmd != nil {
 				m.devs.loading = true
 			}
 		}
-		return m, tea.Batch(tick(), cmd, dcmd, m.fetchCovers())
+		return m, tea.Batch(tick(), cmd, dcmd, m.fetchCovers(), m.fetchLyrics())
 
 	case engineUpMsg:
 		m.rt.proc, m.rt.client = msg.proc, msg.client
@@ -418,6 +429,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case homeMsg:
 		return m.updateHome(msg)
+
+	case lyricsMsg:
+		return m.updateLyrics(msg)
 
 	case coverMsg:
 		return m, nil // kapak artık bellekte; bir sonraki çizimde görünür
@@ -687,6 +701,20 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.switchSpeaker()
 	case "o":
 		return m.toggleSoloist()
+	case "l":
+		// Sözler Şimdi çalıyor sayfasında: başka yerdeyken oraya götürür,
+		// oradayken sözler ile sıradakiler arasında geçer.
+		if m.page != pageNow || m.help {
+			m.page, m.focus, m.help = pageNow, focusMenu, false
+			m.lyr.showQueue = false
+		} else {
+			m.lyr.showQueue = !m.lyr.showQueue
+		}
+		if l, known := m.currentLyrics(); known && l == nil && m.state.Item != nil && m.lyr.login == "" {
+			return m.note(T("lyr.none")), nil
+		}
+	case "L":
+		return m.openLyricsLogin()
 	}
 	return m, nil
 }

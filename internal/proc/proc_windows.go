@@ -1,6 +1,6 @@
 //go:build windows
 
-package soloist
+package proc
 
 import (
 	"os/exec"
@@ -11,10 +11,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// detach, Soloist'i ayrı bir süreç grubunda ve pencere açmadan başlatır.
-// Böylece terminalde basılan Ctrl+C doğrudan Soloist'e gitmez; sotto onu
+// Detach, programı ayrı bir süreç grubunda ve pencere açmadan başlatır.
+// Böylece terminalde basılan Ctrl+C doğrudan programa gitmez; sotto onu
 // kendisi kapatır.
-func detach(cmd *exec.Cmd) {
+func Detach(cmd *exec.Cmd) {
 	const createNoWindow = 0x08000000
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
@@ -28,10 +28,10 @@ var (
 	jobErr  error
 )
 
-// bindToParent, Soloist'i "sotto kapanınca öldür" ayarlı bir Job Object'e
-// koyar. sotto nasıl kapanırsa kapansın (pencere kapatma, çökme) Soloist
+// BindToParent, programı "sotto kapanınca öldür" ayarlı bir Job Object'e
+// koyar. sotto nasıl kapanırsa kapansın (pencere kapatma, çökme) program
 // arka planda kalmaz.
-func bindToParent(pid int) error {
+func BindToParent(pid int) error {
 	jobOnce.Do(func() {
 		h, err := windows.CreateJobObject(nil, nil)
 		if err != nil {
@@ -49,7 +49,7 @@ func bindToParent(pid int) error {
 			jobErr = err
 			return
 		}
-		job = h // sotto'nun ömrü boyunca açık kalır; kapanınca Soloist de kapanır
+		job = h // sotto'nun ömrü boyunca açık kalır; kapanınca program da kapanır
 	})
 	if jobErr != nil {
 		return jobErr

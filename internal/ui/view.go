@@ -244,6 +244,17 @@ func (m Model) nowInfo(w, h int) []string {
 		rows = append(rows, "", theme.Dim.Render(truncate(T("now.inactive"), w)))
 	}
 
+	// Sözler (varsa) ya da sıradakiler; l ikisi arasında geçer.
+	l, known := m.currentLyrics()
+	if !m.lyr.showQueue && (l != nil || !known || m.lyr.login != "") && h-len(rows) > 4 {
+		rows = append(rows, "")
+		return append(rows, m.lyricsRows(w, h-len(rows))...)
+	}
+
+	if known && l == nil && m.state.Item != nil && m.lyr.login == "" {
+		rows = append(rows, "", theme.Faint.Render(truncate(T("lyr.none"), w)))
+	}
+
 	// Sıradakiler.
 	if len(m.queue.Upcoming) > 0 && h-len(rows) > 4 {
 		rows = append(rows, "", theme.Dim.Italic(true).Render(T("now.upnext")))
@@ -466,7 +477,7 @@ func (m Model) helpView(w int) []string {
 		{"tab", "help.tab"}, {"1 – 8", "help.pages"}, {"", ""},
 		{T("key.space"), "help.pause"}, {"n  p", "help.skip"}, {",  .", "help.seek"},
 		{"+  −", "help.vol"}, {"s", "help.shuf"}, {"r", "help.rep"}, {"", ""},
-		{"t", "help.switch"}, {"o", "help.solo"}, {"", ""},
+		{"t", "help.switch"}, {"o", "help.solo"}, {"l", "help.lyrics"}, {"L", "help.lyrlogin"}, {"", ""},
 		{"/", "help.search"}, {"?", "help.keys"}, {"q", "help.quit"},
 	}
 	rows := []string{theme.Title.Render(T("help.title")), ""}
