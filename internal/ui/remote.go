@@ -149,6 +149,9 @@ func (m Model) contextName(uri, kind string) string {
 	if kind == "collection" {
 		return m.likedName()
 	}
+	if name, ok := m.rt.contextNames[uri]; ok {
+		return name
+	}
 	for _, e := range m.lib.entries {
 		if e.uri == uri {
 			return e.name

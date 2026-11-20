@@ -92,7 +92,10 @@ type shared struct {
 	lyricsAsked map[string]bool
 
 	gfx gfxShared // gerçek kapak (Sixel) yerleşimi
-	out *Output   // terminal çıktısı (testlerde nil)
+
+	// contextNames: adını Spotify'ın vermediği bağlamlar (radyo, Spotify'ın listeleri).
+	contextNames map[string]string
+	out          *Output // terminal çıktısı (testlerde nil)
 }
 
 // Model, sotto'nun bütün arayüz durumu.
@@ -149,6 +152,7 @@ func New(cfg config.Config) Model {
 			covers: cover.NewStore(filepath.Join(cfg.LocalDir, "covers")), coverAsked: map[string]bool{},
 			bridge: bridge.New(filepath.Join(cfg.LocalDir, "bridge")),
 			lyrics: map[string]*lyrics.Lyrics{}, lyricsAsked: map[string]bool{},
+			contextNames: map[string]string{},
 		},
 		sp:  spotify.NewClient(cfg.Spotify.ClientID, cfg.TokenFile()),
 		now: time.Now(),
@@ -476,6 +480,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case savedStateMsg, actionDoneMsg:
 		return m.updateActions(msg)
 
+	case radioMsg:
+		return m.updateRadio(msg)
+
 	case wizDownloadedMsg, wizBridgeMsg, wizBridgeRetryMsg:
 		return m.updateWizard(msg)
 
@@ -551,6 +558,7 @@ func (m *Model) apply(ev any) tea.Cmd {
 		}
 	case soloist.PlaybackState:
 		m.state = e
+		m.state.Context = m.nameContext(e.Context)
 	case soloist.TrackChanged:
 		m.state.Item = e.Item
 	case soloist.StatusChanged:
@@ -573,7 +581,7 @@ func (m *Model) apply(ev any) tea.Cmd {
 			})
 		}
 	case soloist.ContextChanged:
-		m.state.Context = e.Context
+		m.state.Context = m.nameContext(e.Context)
 	case soloist.OptionsChanged:
 		m.state.Options = e.Options
 	case soloist.PositionSync:

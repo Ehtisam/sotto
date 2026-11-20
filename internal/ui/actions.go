@@ -29,6 +29,7 @@ const (
 	actSave
 	actUnsave
 	actLink
+	actRadio
 )
 
 type menuItem struct {
@@ -181,6 +182,9 @@ func (m Model) menuItems() []menuItem {
 		if t.track != nil && len(t.track.Artists) > 0 && t.track.Artists[0].URI != "" {
 			add(actArtist, "r", "act.artist")
 		}
+		if m.cfg.Extras.Enabled {
+			add(actRadio, "g", "act.radio")
+		}
 	case "episode":
 		add(actQueue, "q", "act.queue")
 	case "album", "playlist", "show", "liked":
@@ -193,6 +197,9 @@ func (m Model) menuItems() []menuItem {
 		}
 	case "artist":
 		add(actPlay, "p", "act.play")
+		if m.cfg.Extras.Enabled {
+			add(actRadio, "g", "act.radio.artist")
+		}
 		save("act.follow", "act.unfollow")
 	}
 	if t.uri != "" && t.kind != "liked" {
@@ -314,6 +321,8 @@ func (m Model) runAction(id actID) (Model, tea.Cmd) {
 		return m.goTo(t.entry)
 	case actLink:
 		return m.note(T("act.copied")), tea.SetClipboard(spotify.WebLink(uri))
+	case actRadio:
+		return m.note(T("act.radio.making")), m.startRadio(uri)
 	}
 	return m, nil
 }
