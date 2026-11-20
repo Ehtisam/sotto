@@ -30,6 +30,7 @@ func homeModel(t *testing.T) Model {
 	t.Helper()
 	dir := t.TempDir()
 	m := New(config.Config{ConfigDir: dir, LocalDir: dir})
+	m.wiz.on = false // testler kurulumu bitmiş bir sotto ile çalışır
 	m.width, m.height = 120, 40
 	m.now = time.Date(2026, 11, 20, 20, 0, 0, 0, time.UTC)
 	m.lib.entries = []libEntry{

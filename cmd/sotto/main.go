@@ -23,6 +23,9 @@ func main() {
 
 	out := ui.NewOutput(os.Stdout)
 	m := ui.New(cfg).WithOutput(out)
+	if len(os.Args) > 1 && os.Args[1] == "setup" { // kurulumu yeniden aç
+		m = m.StartSetup()
+	}
 	// Soloist sotto açıkken çalışır; nasıl çıkılırsa çıkılsın kapatılır.
 	defer m.Shutdown()
 

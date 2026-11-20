@@ -64,6 +64,7 @@ func TestEscClearsThenLeaves(t *testing.T) {
 func TestSlashOpensSearch(t *testing.T) {
 	dir := t.TempDir()
 	m := New(config.Config{ConfigDir: dir, LocalDir: dir})
+	m.wiz.on = false
 	m = press(m, "/", '/')
 	if m.page != pageSearch || m.focus != focusContent || !m.search.typing {
 		t.Fatal("/ should open search with the input focused")
@@ -73,6 +74,7 @@ func TestSlashOpensSearch(t *testing.T) {
 func TestLyricsKeyGoesToNowPlaying(t *testing.T) {
 	dir := t.TempDir()
 	m := New(config.Config{ConfigDir: dir, LocalDir: dir})
+	m.wiz.on = false
 	m.page, m.focus = pageLibrary, focusContent
 	m.lyr.showQueue = true
 	m = press(m, "l", 'l')

@@ -158,6 +158,8 @@ func (m Model) menu(h int) string {
 func (m Model) content(w, h int) string {
 	var rows []string
 	switch {
+	case m.wiz.on:
+		rows = m.wizardView(w)
 	case m.actions.open:
 		rows = m.actionsView(w)
 	case m.help:
@@ -435,9 +437,18 @@ func bar(pos, dur time.Duration, w int) string {
 
 // hints, en alttaki kısayol satırı. Önemli olanlardan başlayıp sığdığı
 // kadarını gösterir; tam liste her zaman ? ile açılır.
+// hint, alt satırdaki bir kısayol: tuş ve ne yaptığı.
+type hint struct{ key, verb string }
+
 func (m Model) hints(w int) string {
-	type hint struct{ key, verb string }
 	var hs []hint
+	if m.wiz.on {
+		parts := []string{}
+		for _, h := range m.wizardHints() {
+			parts = append(parts, theme.Dim.Render(h.key)+" "+theme.Faint.Render(h.verb))
+		}
+		return ansi.Truncate(strings.Repeat(" ", margin)+strings.Join(parts, theme.Faint.Render(" · ")), w, "…")
+	}
 	if m.actions.open {
 		hs = []hint{{"↑ ↓", T("hint.select")}, {"enter", T("hint.do")}, {"esc", T("hint.close")}}
 	} else if m.help {

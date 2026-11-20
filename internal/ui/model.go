@@ -130,6 +130,7 @@ type Model struct {
 	prof    profileState
 	set     settingsState
 	help    bool // ? ile açılan kısayol listesi
+	wiz     wizardState
 	actions actionMenu
 	lyr     lyricsState
 
@@ -160,6 +161,7 @@ func New(cfg config.Config) Model {
 	switch {
 	case !m.sp.HasClientID():
 		m.spState = spNoClient
+		m.wiz.on = true // ilk açılış: kurulum sihirbazı
 	case m.sp.HasLogin():
 		m.spState = spReady
 		m.lib.loading = true // Init kitaplığı ve ana sayfayı yüklemeye başlar
@@ -333,7 +335,8 @@ func (m Model) loadMe() tea.Cmd {
 	}
 }
 
-func openBrowser(u string) error {
+// openBrowser, adresi varsayılan tarayıcıda açar (testler değiştirir).
+var openBrowser = func(u string) error {
 	switch runtime.GOOS {
 	case "windows":
 		return exec.Command("rundll32", "url.dll,FileProtocolHandler", u).Start()
@@ -472,6 +475,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case savedStateMsg, actionDoneMsg:
 		return m.updateActions(msg)
+
+	case wizDownloadedMsg, wizBridgeMsg, wizBridgeRetryMsg:
+		return m.updateWizard(msg)
+
+	case tea.PasteMsg:
+		if m.wiz.on {
+			return m.wizardPaste(msg.Content), nil
+		}
 
 	case coverMsg:
 		return m, nil // kapak artık bellekte; bir sonraki çizimde görünür
@@ -638,6 +649,14 @@ func (m Model) describe(e *soloist.Entity) (name, artists, album string) {
 
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+
+	// Kurulum sihirbazı açıkken bütün tuşlar ona gider.
+	if m.wiz.on {
+		if k == "ctrl+c" {
+			return m, m.quit()
+		}
+		return m.wizardKey(msg)
+	}
 
 	// Eylem menüsü açıkken tuşlar ona gider.
 	if m.actions.open {
