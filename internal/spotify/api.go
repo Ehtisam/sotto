@@ -39,6 +39,10 @@ type Track struct {
 	Artists    []Artist `json:"artists"`
 	Album      Album    `json:"album"`
 	Type       string   `json:"type"` // track ya da episode
+
+	// Yalnızca podcast bölümlerinde.
+	ReleaseDate string  `json:"release_date"`
+	Images      []Image `json:"images"`
 }
 
 func (t Track) ArtistNames() string {

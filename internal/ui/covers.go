@@ -66,10 +66,13 @@ func (m Model) nowCoverURL() string {
 }
 
 func (m Model) openListCoverURL() string {
-	if m.page != pageLibrary || m.lib.open == nil {
-		return ""
+	switch {
+	case m.page == pageLibrary && m.lib.open != nil:
+		return m.lib.open.entry.image
+	case m.page == pageSearch && m.search.open != nil:
+		return m.search.open.entry.image
 	}
-	return m.lib.open.image
+	return ""
 }
 
 // pickImage, ~300 piksele en yakın kapağı seçer: terminalde daha büyüğü fark etmez.

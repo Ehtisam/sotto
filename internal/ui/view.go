@@ -160,6 +160,8 @@ func (m Model) content(w, h int) string {
 		rows = m.nowPlaying(w, h)
 	case m.page == pageLibrary:
 		rows = m.libraryView(w, h)
+	case m.page == pageSearch:
+		rows = m.searchView(w)
 	case m.page == pageDevices:
 		rows = m.devicesView(w)
 	default:
@@ -412,6 +414,14 @@ func (m Model) hints(w int) string {
 	var hs []hint
 	if m.help {
 		hs = []hint{{"esc", T("hint.close")}}
+	} else if m.focus == focusContent && m.page == pageSearch && m.search.typing && m.search.open == nil {
+		// Yazarken kısayollar çalışmaz; sadece aramaya dair olanlar.
+		hs = []hint{{T("hint.type"), T("hint.tosearch")}, {"tab", T("hint.filter")}, {"enter ↓", T("hint.results")}, {"esc", T("hint.back")}}
+		parts := make([]string, len(hs))
+		for i, h := range hs {
+			parts[i] = theme.Dim.Render(h.key) + " " + theme.Faint.Render(h.verb)
+		}
+		return ansi.Truncate(strings.Repeat(" ", margin)+strings.Join(parts, theme.Faint.Render(" · ")), w, "…")
 	} else if m.focus == focusContent {
 		hs = []hint{{"↑ ↓", T("hint.select")}, {"enter", T("hint.play")}, {"esc", T("hint.back")}}
 	} else {
@@ -455,7 +465,7 @@ func (m Model) helpView(w int) []string {
 		{T("key.space"), "help.pause"}, {"n  p", "help.skip"}, {",  .", "help.seek"},
 		{"+  −", "help.vol"}, {"s", "help.shuf"}, {"r", "help.rep"}, {"", ""},
 		{"t", "help.switch"}, {"o", "help.solo"}, {"", ""},
-		{"?", "help.keys"}, {"q", "help.quit"},
+		{"/", "help.search"}, {"?", "help.keys"}, {"q", "help.quit"},
 	}
 	rows := []string{theme.Title.Render(T("help.title")), ""}
 	for _, k := range keys {

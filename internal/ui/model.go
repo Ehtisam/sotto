@@ -43,7 +43,7 @@ var pages = []struct{ numeral, name, soon string }{
 }
 
 // hasContent: içine girilip gezinilebilen sayfalar.
-func (p page) hasContent() bool { return p == pageLibrary || p == pageDevices }
+func (p page) hasContent() bool { return p == pageLibrary || p == pageDevices || p == pageSearch }
 
 type focusArea int
 
@@ -109,9 +109,10 @@ type Model struct {
 	spErr   error
 	me      spotify.User
 
-	lib  library
-	devs deviceList
-	help bool // ? ile açılan kısayol listesi
+	lib    library
+	search searchState
+	devs   deviceList
+	help   bool // ? ile açılan kısayol listesi
 
 	flash     string
 	flashAt   time.Time
@@ -408,6 +409,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case devicesMsg, transferredMsg:
 		return m.updateDevices(msg)
 
+	case searchFireMsg, searchResultMsg:
+		return m.updateSearch(msg)
+
 	case coverMsg:
 		return m, nil // kapak artık bellekte; bir sonraki çizimde görünür
 
@@ -583,8 +587,15 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Ara sayfasında yazarken harfler kısayol değil, aranacak metindir.
+	if m.focus == focusContent && !m.help && m.page == pageSearch {
+		if mm, cmd, ok := m.searchKey(msg); ok {
+			return mm, cmd
+		}
+	}
+
 	// İçerikteyken gezinme tuşları önce sayfaya gider.
-	if m.focus == focusContent && !m.help {
+	if m.focus == focusContent && !m.help && m.page != pageSearch {
 		if mm, cmd, ok := m.contentKey(k); ok {
 			return mm, cmd
 		}
@@ -597,6 +608,10 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.help = true
 		return m, nil
+	case "/":
+		m.page, m.focus = pageSearch, focusContent
+		m.search.open = nil
+		return m.enterSearch(), nil
 
 	case "up", "k":
 		m.page = (m.page + page(len(pages)) - 1) % page(len(pages))
@@ -607,6 +622,9 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter", "right", "tab":
 		if m.page.hasContent() {
 			m.focus = focusContent
+			if m.page == pageSearch {
+				m = m.enterSearch()
+			}
 			cmd := m.enterPage()
 			return m, cmd
 		}
