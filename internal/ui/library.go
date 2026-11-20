@@ -63,6 +63,7 @@ func playlistEntry(pl spotify.Playlist) libEntry {
 		kind: kindPlaylist, key: pl.ID, uri: pl.URI, name: pl.Name,
 		owner: pl.Owner.DisplayName, desc: cleanDesc(pl.Description),
 		image: pickImage(pl.Images), total: pl.Total(),
+		ownerID: pl.Owner.ID, collaborative: pl.Collaborative,
 	}
 }
 

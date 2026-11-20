@@ -117,12 +117,13 @@ type Model struct {
 	spErr   error
 	me      spotify.User
 
-	lib    library
-	search searchState
-	home   homeState
-	devs   deviceList
-	help   bool // ? ile açılan kısayol listesi
-	lyr    lyricsState
+	lib     library
+	search  searchState
+	home    homeState
+	devs    deviceList
+	help    bool // ? ile açılan kısayol listesi
+	actions actionMenu
+	lyr     lyricsState
 
 	flash     string
 	flashAt   time.Time
@@ -433,6 +434,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case lyricsMsg:
 		return m.updateLyrics(msg)
 
+	case savedStateMsg, actionDoneMsg:
+		return m.updateActions(msg)
+
 	case coverMsg:
 		return m, nil // kapak artık bellekte; bir sonraki çizimde görünür
 
@@ -599,6 +603,14 @@ func (m Model) describe(e *soloist.Entity) (name, artists, album string) {
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 
+	// Eylem menüsü açıkken tuşlar ona gider.
+	if m.actions.open {
+		if k == "ctrl+c" {
+			return m, tea.Quit
+		}
+		return m.actionsKey(k)
+	}
+
 	// Kısayol listesi açıkken: esc ya da ? kapatır.
 	if m.help {
 		switch k {
@@ -697,8 +709,10 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.control(
 			func(ctx context.Context, c *soloist.Client) error { return c.SetRepeat(ctx, next) },
 			func(ctx context.Context, s *spotify.Client) error { return s.SetRepeat(ctx, next) })
-	case "t", "a":
+	case "t":
 		return m.switchSpeaker()
+	case "a":
+		return m.openActions()
 	case "o":
 		return m.toggleSoloist()
 	case "l":

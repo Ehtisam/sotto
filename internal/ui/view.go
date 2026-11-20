@@ -154,6 +154,8 @@ func (m Model) menu(h int) string {
 func (m Model) content(w, h int) string {
 	var rows []string
 	switch {
+	case m.actions.open:
+		rows = m.actionsView(w)
 	case m.help:
 		rows = m.helpView(w)
 	case m.page == pageNow:
@@ -425,7 +427,9 @@ func bar(pos, dur time.Duration, w int) string {
 func (m Model) hints(w int) string {
 	type hint struct{ key, verb string }
 	var hs []hint
-	if m.help {
+	if m.actions.open {
+		hs = []hint{{"↑ ↓", T("hint.select")}, {"enter", T("hint.do")}, {"esc", T("hint.close")}}
+	} else if m.help {
 		hs = []hint{{"esc", T("hint.close")}}
 	} else if m.focus == focusContent && m.page == pageSearch && m.search.typing && m.search.open == nil {
 		// Yazarken kısayollar çalışmaz; sadece aramaya dair olanlar.
@@ -477,7 +481,7 @@ func (m Model) helpView(w int) []string {
 		{"tab", "help.tab"}, {"1 – 8", "help.pages"}, {"", ""},
 		{T("key.space"), "help.pause"}, {"n  p", "help.skip"}, {",  .", "help.seek"},
 		{"+  −", "help.vol"}, {"s", "help.shuf"}, {"r", "help.rep"}, {"", ""},
-		{"t", "help.switch"}, {"o", "help.solo"}, {"l", "help.lyrics"}, {"L", "help.lyrlogin"}, {"", ""},
+		{"a", "help.actions"}, {"t", "help.switch"}, {"o", "help.solo"}, {"l", "help.lyrics"}, {"L", "help.lyrlogin"}, {"", ""},
 		{"/", "help.search"}, {"?", "help.keys"}, {"q", "help.quit"},
 	}
 	rows := []string{theme.Title.Render(T("help.title")), ""}

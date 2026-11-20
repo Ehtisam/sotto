@@ -38,6 +38,9 @@ type libEntry struct {
 	image string
 	total int
 	album spotify.Album // yalnızca albümler için
+
+	ownerID       string // listeler: sahibinin kullanıcı kimliği
+	collaborative bool
 }
 
 var tagRE = regexp.MustCompile(`<[^>]*>`)
@@ -146,6 +149,21 @@ func (tl *trackList) receive(msg tracksPageMsg) bool {
 	}
 	tl.total = msg.total
 	return true
+}
+
+// remove, şarkıyı listeden çıkarır (listeden silinince ekran hemen güncellensin).
+func (tl *trackList) remove(uri string) {
+	out := tl.tracks[:0]
+	for _, t := range tl.tracks {
+		if t.URI != uri {
+			out = append(out, t)
+		}
+	}
+	if removed := len(tl.tracks) - len(out); removed > 0 {
+		tl.total -= removed
+	}
+	tl.tracks = out
+	tl.cursor = max(0, min(tl.cursor, len(tl.tracks)-1))
 }
 
 func (tl *trackList) clamp(h int) {
