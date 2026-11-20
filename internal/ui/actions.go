@@ -72,9 +72,8 @@ func (m Model) actionTarget() (searchItem, *libEntry, bool) {
 		switch m.page {
 		case pageLibrary:
 			tl = m.lib.open
-			if tl == nil && len(m.lib.entries) > 0 {
-				e := m.lib.entries[m.lib.cursor]
-				return entryItem(e), nil, true
+			if vis := m.libVisible(); tl == nil && len(vis) > 0 {
+				return entryItem(vis[min(m.lib.cursor, len(vis)-1)]), nil, true
 			}
 		case pageSearch:
 			tl = m.search.open
@@ -89,6 +88,11 @@ func (m Model) actionTarget() (searchItem, *libEntry, bool) {
 		case pageQueue:
 			if items := m.queueItems(); len(items) > 0 {
 				return items[m.queueCursor(items)], nil, true
+			}
+		case pageProfile:
+			tl = m.prof.open
+			if it, ok := m.profileSelected(); tl == nil && ok {
+				return it, nil, true
 			}
 		}
 		if tl != nil && len(tl.tracks) > 0 {

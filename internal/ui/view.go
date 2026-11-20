@@ -170,6 +170,8 @@ func (m Model) content(w, h int) string {
 		rows = m.devicesView(w)
 	case m.page == pageQueue:
 		rows = m.queueView(w)
+	case m.page == pageProfile:
+		rows = m.profileView(w)
 	default:
 		p := pages[m.page]
 		rows = []string{
@@ -442,9 +444,16 @@ func (m Model) hints(w int) string {
 		}
 		return ansi.Truncate(strings.Repeat(" ", margin)+strings.Join(parts, theme.Faint.Render(" · ")), w, "…")
 	} else if m.focus == focusContent {
-		hs = []hint{{"↑ ↓", T("hint.select")}, {"enter", T("hint.play")}, {"esc", T("hint.back")}}
+		hs = []hint{{"↑ ↓", T("hint.select")}, {"enter", T("hint.play")}}
+		switch {
+		case m.page == pageLibrary && m.lib.open == nil:
+			hs = append(hs, hint{"tab", T("hint.filter")})
+		case m.page == pageProfile && m.prof.open == nil:
+			hs = append(hs, hint{"tab", T("hint.nextlist")})
+		}
+		hs = append(hs, hint{"esc", T("hint.back")}, hint{"1–8", T("hint.pages")})
 	} else {
-		hs = []hint{{"↑ ↓", T("hint.page")}}
+		hs = []hint{{"↑ ↓", T("hint.page")}, {"1–8", T("hint.pages")}}
 		if m.page.hasContent() {
 			hs = append(hs, hint{"enter", T("hint.enter")})
 		}
@@ -480,7 +489,7 @@ func (m Model) hints(w int) string {
 func (m Model) helpView(w int) []string {
 	keys := [][2]string{
 		{"↑ ↓  j k", "help.move"}, {"enter  →", "help.open"}, {"esc  ←", "help.back"},
-		{"tab", "help.tab"}, {"1 – 8", "help.pages"}, {"", ""},
+		{"tab", "help.tab"}, {"shift+tab", "help.backtab"}, {"1 – 8", "help.pages"}, {"", ""},
 		{T("key.space"), "help.pause"}, {"n  p", "help.skip"}, {",  .", "help.seek"},
 		{"+  −", "help.vol"}, {"s", "help.shuf"}, {"r", "help.rep"}, {"", ""},
 		{"a", "help.actions"}, {"t", "help.switch"}, {"o", "help.solo"}, {"l", "help.lyrics"}, {"L", "help.lyrlogin"}, {"", ""},

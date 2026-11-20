@@ -22,7 +22,11 @@ type coverMsg struct {
 // fetchCovers, ekranda gereken ama henüz indirilmemiş kapakları ister.
 func (m Model) fetchCovers() tea.Cmd {
 	var urls []string
-	for _, u := range []string{m.nowCoverURL(), m.openListCoverURL()} {
+	photo := ""
+	if m.page == pageProfile && m.prof.open == nil {
+		photo, _, _ = m.profilePhoto()
+	}
+	for _, u := range []string{m.nowCoverURL(), m.openListCoverURL(), photo} {
 		if u == "" || m.rt.coverAsked[u] || m.rt.covers.Has(u) {
 			continue
 		}
@@ -73,6 +77,8 @@ func (m Model) openListCoverURL() string {
 		return m.search.open.entry.image
 	case m.page == pageHome && m.home.open != nil:
 		return m.home.open.entry.image
+	case m.page == pageProfile && m.prof.open != nil:
+		return m.prof.open.entry.image
 	}
 	return ""
 }

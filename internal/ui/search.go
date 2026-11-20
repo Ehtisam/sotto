@@ -294,6 +294,11 @@ func (m Model) playOne(uri string) tea.Cmd {
 
 // itemRows, bölümlü bir sonuç listesinin görünen satırları.
 func (m Model) itemRows(items []searchItem, cursor, scroll, w int, active bool) []string {
+	return m.itemRowsH(items, cursor, scroll, w, m.listHeight(), active)
+}
+
+// itemRowsH, itemRows'un yüksekliği verilen hâli (başlığı uzun sayfalar için).
+func (m Model) itemRowsH(items []searchItem, cursor, scroll, w, h int, active bool) []string {
 	playing, playingCtx := "", ""
 	if m.state.Item != nil {
 		playing = m.state.Item.URI
@@ -302,7 +307,7 @@ func (m Model) itemRows(items []searchItem, cursor, scroll, w int, active bool) 
 		playingCtx = m.state.Context.URI
 	}
 	var rows []string
-	end := min(len(items), scroll+m.listHeight())
+	end := min(len(items), scroll+h)
 	for i := scroll; i < end; i++ {
 		it := items[i]
 		switch it.kind {

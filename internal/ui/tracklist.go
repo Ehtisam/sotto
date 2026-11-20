@@ -41,6 +41,7 @@ type libEntry struct {
 
 	ownerID       string // listeler: sahibinin kullanıcı kimliği
 	collaborative bool
+	public        bool // listeler: profilde herkese açık
 }
 
 var tagRE = regexp.MustCompile(`<[^>]*>`)

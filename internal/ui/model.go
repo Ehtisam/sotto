@@ -40,13 +40,13 @@ var pages = []struct{ numeral, name, soon string }{
 	{"IV", "page.library", ""},
 	{"V", "page.queue", ""},
 	{"VI", "page.devices", "soon.devices"},
-	{"VII", "page.profile", "soon.profile"},
+	{"VII", "page.profile", ""},
 	{"VIII", "page.settings", "soon.settings"},
 }
 
 // hasContent: içine girilip gezinilebilen sayfalar.
 func (p page) hasContent() bool {
-	return p == pageHome || p == pageLibrary || p == pageDevices || p == pageSearch || p == pageQueue
+	return p == pageHome || p == pageLibrary || p == pageDevices || p == pageSearch || p == pageQueue || p == pageProfile
 }
 
 type focusArea int
@@ -122,6 +122,7 @@ type Model struct {
 	home    homeState
 	devs    deviceList
 	qs      queueState
+	prof    profileState
 	help    bool // ? ile açılan kısayol listesi
 	actions actionMenu
 	lyr     lyricsState
@@ -346,7 +347,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.lib.clamp(m.listHeight())
+		m.clampLib()
 		return m, nil
 
 	case tickMsg:
@@ -410,6 +411,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.spotifyFailed(msg.err), nil
 		}
 		m.me = msg.user
+		switch m.page { // profil bilgisi için kullanıcı kimliği gerekiyordu
+		case pageProfile:
+			return m, m.maybeLoadProfile()
+		case pageLibrary:
+			return m, m.maybeLoadProfileView()
+		}
 		return m, nil
 
 	case enrichMsg:
@@ -432,6 +439,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case homeMsg:
 		return m.updateHome(msg)
+
+	case profileTopMsg, profileCountsMsg, profileViewMsg:
+		return m.updateProfile(msg)
 
 	case lyricsMsg:
 		return m.updateLyrics(msg)
@@ -648,12 +658,27 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.search.open = nil
 		return m.enterSearch(), nil
 
-	case "up", "k":
-		m.page = (m.page + page(len(pages)) - 1) % page(len(pages))
-	case "down", "j":
-		m.page = (m.page + 1) % page(len(pages))
+	case "up", "k", "down", "j":
+		// Menüde gezerken de sayfanın verisini iste: önizlemesi hemen dolsun.
+		if k == "up" || k == "k" {
+			m.page = (m.page + page(len(pages)) - 1) % page(len(pages))
+		} else {
+			m.page = (m.page + 1) % page(len(pages))
+		}
+		cmd := m.loadPage()
+		return m, cmd
 	case "1", "2", "3", "4", "5", "6", "7", "8":
-		m.page, m.focus = page(k[0]-'1'), focusMenu
+		// Rakam sayfaya götürür ve içine girer; içi olmayan sayfada menüde kalır.
+		m.page, m.focus, m.help = page(k[0]-'1'), focusMenu, false
+		if m.page.hasContent() {
+			m.focus = focusContent
+			if m.page == pageSearch {
+				m.search.open = nil
+				m = m.enterSearch()
+			}
+			cmd := m.enterPage()
+			return m, cmd
+		}
 	case "enter", "right", "tab":
 		if m.page.hasContent() {
 			m.focus = focusContent
@@ -737,10 +762,16 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // contentKey, içerik odaktayken sayfanın kendi tuşları. ok=false ise tuş genel kısayollara düşer.
 func (m Model) contentKey(k string) (Model, tea.Cmd, bool) {
-	if k == "tab" {
-		m.focus = focusMenu
-		return m, nil, true
+	mm, cmd, ok := m.pageKey(k)
+	if !ok && k == "tab" {
+		mm.focus = focusMenu
+		return mm, nil, true
 	}
+	return mm, cmd, ok
+}
+
+// pageKey, içerik odaktayken tuşu açık sayfaya verir.
+func (m Model) pageKey(k string) (Model, tea.Cmd, bool) {
 	switch m.page {
 	case pageHome:
 		return m.homeKey(k)
@@ -750,18 +781,41 @@ func (m Model) contentKey(k string) (Model, tea.Cmd, bool) {
 		return m.devicesKey(k)
 	case pageQueue:
 		return m.queueKey(k)
+	case pageProfile:
+		return m.profileKey(k)
 	}
 	return m, nil, false
 }
 
+// loadPage, sayfanın verisi eksik ya da eskiyse ister (menüde üstüne gelince
+// de çağrılır; imleçlere dokunmaz).
+func (m *Model) loadPage() tea.Cmd {
+	switch m.page {
+	case pageQueue:
+		mm, cmd := m.refreshQueue()
+		*m = mm
+		return tea.Batch(cmd, m.maybeLoadHome(), m.enrich())
+	case pageProfile:
+		return m.maybeLoadProfile()
+	}
+	return m.enterPage()
+}
+
 // enterPage, bir sayfaya girilince gerekenleri başlatır.
 func (m *Model) enterPage() tea.Cmd {
-	if m.page == pageLibrary && m.spState == spReady && !m.lib.loaded && !m.lib.loading {
-		m.lib.loading = true
-		return m.loadLibrary()
+	if m.page == pageLibrary {
+		view := m.maybeLoadProfileView() // "profilinde" işaretleri için
+		if m.spState == spReady && !m.lib.loaded && !m.lib.loading {
+			m.lib.loading = true
+			return tea.Batch(m.loadLibrary(), view)
+		}
+		return view
 	}
 	if m.page == pageHome {
 		return m.maybeLoadHome()
+	}
+	if m.page == pageProfile {
+		return m.maybeLoadProfile()
 	}
 	if m.page == pageQueue {
 		m.qs.cursor, m.qs.scroll = 0, 0
