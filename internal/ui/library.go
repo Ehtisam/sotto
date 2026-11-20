@@ -78,8 +78,11 @@ func (m Model) updateLibrary(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lib.entries, m.lib.loaded = msg.entries, true
 		}
 		m.lib.clamp(m.listHeight())
+		if !m.home.fetched.IsZero() {
+			m.rebuildHome() // liste adları artık biliniyor
+		}
 	case tracksPageMsg:
-		for _, tl := range []*trackList{m.lib.open, m.search.open} {
+		for _, tl := range []*trackList{m.lib.open, m.search.open, m.home.open} {
 			if tl.receive(msg) {
 				if msg.err != nil {
 					return m.spotifyFailed(msg.err), nil

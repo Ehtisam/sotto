@@ -71,6 +71,8 @@ func (m Model) openListCoverURL() string {
 		return m.lib.open.entry.image
 	case m.page == pageSearch && m.search.open != nil:
 		return m.search.open.entry.image
+	case m.page == pageHome && m.home.open != nil:
+		return m.home.open.entry.image
 	}
 	return ""
 }

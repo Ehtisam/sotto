@@ -41,7 +41,8 @@ type searchItem struct {
 	sub     string
 	uri     string
 	track   *spotify.Track
-	entry   libEntry // album ve playlist açılırken
+	ctx     string   // şarkı bu bağlamda (liste, albüm) çalınsın; boşsa albümünde
+	entry   libEntry // album, playlist ve show açılırken
 	section string   // header satırları için
 }
 
@@ -148,6 +149,9 @@ func searchItems(r spotify.SearchResult, filter int) []searchItem {
 			return
 		}
 		if filter == filterAll {
+			if len(out) > 0 {
+				out = append(out, searchItem{kind: "space"})
+			}
 			out = append(out, searchItem{kind: "header", section: section})
 			items = items[:min(len(items), allCounts[kind])]
 		}
@@ -236,23 +240,85 @@ func artistNames(as []spotify.Artist) string {
 	return strings.Join(names, ", ")
 }
 
-// nextSelectable, bölüm başlıklarını atlayarak seçilebilir bir satır bulur.
+// selectable: bölüm başlıkları ve aradaki boş satırlar seçilemez.
+func (it searchItem) selectable() bool { return it.kind != "header" && it.kind != "space" }
+
+// nextSelectable, başlıkları atlayarak seçilebilir bir satır bulur.
 func nextSelectable(items []searchItem, i, dir int) int {
 	if len(items) == 0 {
 		return 0
 	}
 	i = max(0, min(len(items)-1, i))
 	for j := i; j >= 0 && j < len(items); j += dir {
-		if items[j].kind != "header" {
+		if items[j].selectable() {
 			return j
 		}
 	}
 	for j := i; j >= 0 && j < len(items); j -= dir {
-		if items[j].kind != "header" {
+		if items[j].selectable() {
 			return j
 		}
 	}
 	return i
+}
+
+// actOn, bir satırda enter: şarkıyı ya da sanatçıyı çalar, albümü,
+// listeyi ya da podcast'i açar (açılan liste döner).
+func (m Model) actOn(it searchItem) (*trackList, tea.Cmd) {
+	switch it.kind {
+	case "track":
+		ctx := it.ctx
+		if ctx == "" && it.track != nil {
+			ctx = it.track.Album.URI
+		}
+		if ctx == "" {
+			return nil, m.playOne(it.uri)
+		}
+		return nil, m.playContext(ctx, it.uri)
+	case "album", "playlist", "show", "liked":
+		return m.openList(it.entry)
+	case "artist":
+		return nil, m.playContext(it.uri, "")
+	case "episode":
+		return nil, m.playOne(it.uri)
+	}
+	return nil, nil
+}
+
+func (m Model) playOne(uri string) tea.Cmd {
+	return m.playOn(func(c context.Context, sp *spotify.Client, id string) error {
+		return sp.PlayTracks(c, id, []string{uri}, "")
+	})
+}
+
+// itemRows, bölümlü bir sonuç listesinin görünen satırları.
+func (m Model) itemRows(items []searchItem, cursor, scroll, w int, active bool) []string {
+	playing, playingCtx := "", ""
+	if m.state.Item != nil {
+		playing = m.state.Item.URI
+	}
+	if m.state.Context != nil {
+		playingCtx = m.state.Context.URI
+	}
+	var rows []string
+	end := min(len(items), scroll+m.listHeight())
+	for i := scroll; i < end; i++ {
+		it := items[i]
+		switch it.kind {
+		case "header":
+			rows = append(rows, theme.Dim.Italic(true).Render(T(it.section)))
+			continue
+		case "space":
+			rows = append(rows, "")
+			continue
+		}
+		mark := "  "
+		if it.uri != "" && (it.uri == playing || it.uri == playingCtx) {
+			mark = theme.GoldText.Render("♪ ")
+		}
+		rows = append(rows, mark+row(it.name, it.sub, w-2, active && i == cursor))
+	}
+	return rows
 }
 
 // enterSearch, sayfaya girilince yazı kutusunu odaklar.
@@ -355,28 +421,11 @@ func (m Model) searchKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 			s.typing = true
 			return m, nil, true
 		}
-		it := s.items[s.cursor]
-		switch it.kind {
-		case "track":
-			ctx := it.track.Album.URI
-			if ctx == "" {
-				return m, m.playOn(func(c context.Context, sp *spotify.Client, id string) error {
-					return sp.PlayTracks(c, id, []string{it.uri}, "")
-				}), true
-			}
-			return m, m.playContext(ctx, it.uri), true
-		case "album", "playlist", "show":
-			tl, cmd := m.openList(it.entry)
+		tl, cmd := m.actOn(s.items[s.cursor])
+		if tl != nil {
 			s.open = tl
-			return m, cmd, true
-		case "artist":
-			return m, m.playContext(it.uri, ""), true
-		case "episode":
-			uri := it.uri
-			return m, m.playOn(func(c context.Context, sp *spotify.Client, id string) error {
-				return sp.PlayTracks(c, id, []string{uri}, "")
-			}), true
 		}
+		return m, cmd, true
 	case "esc", "left", "backspace":
 		m.focus = focusMenu
 	default:
@@ -437,22 +486,5 @@ func (m Model) searchView(w int) []string {
 		return append(rows, theme.Dim.Render(T("search.none")))
 	}
 
-	playing := ""
-	if m.state.Item != nil {
-		playing = m.state.Item.URI
-	}
-	end := min(len(s.items), s.scroll+m.listHeight())
-	for i := s.scroll; i < end; i++ {
-		it := s.items[i]
-		if it.kind == "header" {
-			rows = append(rows, theme.Dim.Italic(true).Render(T(it.section)))
-			continue
-		}
-		mark := "  "
-		if it.uri == playing {
-			mark = theme.GoldText.Render("♪ ")
-		}
-		rows = append(rows, mark+row(it.name, it.sub, w-2, active && !s.typing && i == s.cursor))
-	}
-	return rows
+	return append(rows, m.itemRows(s.items, s.cursor, s.scroll, w, active && !s.typing)...)
 }

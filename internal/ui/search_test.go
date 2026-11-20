@@ -19,11 +19,11 @@ func sampleResult() spotify.SearchResult {
 
 func TestSearchItemsAll(t *testing.T) {
 	items := searchItems(sampleResult(), filterAll)
-	// başlık + 5 şarkı, başlık + 1 sanatçı, başlık + 1 liste
-	if got, want := len(items), 1+5+1+1+1+1; got != want {
+	// başlık + 5 şarkı, boşluk + başlık + 1 sanatçı, boşluk + başlık + 1 liste
+	if got, want := len(items), 1+5+2+1+2+1; got != want {
 		t.Fatalf("len = %d, want %d", got, want)
 	}
-	if items[0].kind != "header" || items[6].kind != "header" {
+	if items[0].kind != "header" || items[6].kind != "space" || items[7].kind != "header" {
 		t.Fatalf("section headers missing: %+v", items)
 	}
 	if items[len(items)-1].kind != "playlist" {
@@ -47,10 +47,10 @@ func TestNextSelectableSkipsHeaders(t *testing.T) {
 	if got := nextSelectable(items, 0, 1); got != 1 {
 		t.Fatalf("down from header = %d, want 1", got)
 	}
-	if got := nextSelectable(items, 6, 1); got != 7 {
-		t.Fatalf("down onto header = %d, want 7", got)
+	if got := nextSelectable(items, 6, 1); got != 8 {
+		t.Fatalf("down onto spacer = %d, want 8", got)
 	}
-	if got := nextSelectable(items, 6, -1); got != 5 {
+	if got := nextSelectable(items, 7, -1); got != 5 {
 		t.Fatalf("up onto header = %d, want 5", got)
 	}
 }

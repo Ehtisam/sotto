@@ -128,6 +128,23 @@ var texts = map[string]struct{ en, tr string }{
 	"hint.filter":   {"filter", "süzgeç"},
 	"hint.results":  {"results", "sonuçlar"},
 
+	// ana sayfa
+	"home.jump":       {"Jump back in", "Kaldığın yerden devam"},
+	"home.recent":     {"Recently played", "Son çalınanlar"},
+	"home.toptracks":  {"Your top songs this month", "Bu ay en çok dinlediklerin"},
+	"home.topartists": {"Your top artists this month", "Bu ayın sanatçıları"},
+	"home.empty":      {"Nothing here yet. Play something and it shows up here.", "Burada henüz bir şey yok. Bir şey çal, burada görünür."},
+	"home.greet":      {"%s, %s.", "%s, %s."},
+	"greet.morning":   {"Good morning", "Günaydın"},
+	"greet.afternoon": {"Good afternoon", "İyi günler"},
+	"greet.evening":   {"Good evening", "İyi akşamlar"},
+	"greet.night":     {"Good night", "İyi geceler"},
+	"ago.now":         {"just now", "az önce"},
+	"ago.min":         {"%d min ago", "%d dk önce"},
+	"ago.hour":        {"%d h ago", "%d sa önce"},
+	"ago.yesterday":   {"yesterday", "dün"},
+	"ago.days":        {"%d days ago", "%d gün önce"},
+
 	// ara
 	"search.all":          {"All", "Hepsi"},
 	"search.songs":        {"Songs", "Şarkılar"},

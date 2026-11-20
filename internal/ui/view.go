@@ -162,6 +162,8 @@ func (m Model) content(w, h int) string {
 		rows = m.libraryView(w, h)
 	case m.page == pageSearch:
 		rows = m.searchView(w)
+	case m.page == pageHome:
+		rows = m.homeView(w)
 	case m.page == pageDevices:
 		rows = m.devicesView(w)
 	default:

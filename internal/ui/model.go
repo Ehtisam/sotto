@@ -43,7 +43,9 @@ var pages = []struct{ numeral, name, soon string }{
 }
 
 // hasContent: içine girilip gezinilebilen sayfalar.
-func (p page) hasContent() bool { return p == pageLibrary || p == pageDevices || p == pageSearch }
+func (p page) hasContent() bool {
+	return p == pageHome || p == pageLibrary || p == pageDevices || p == pageSearch
+}
 
 type focusArea int
 
@@ -111,6 +113,7 @@ type Model struct {
 
 	lib    library
 	search searchState
+	home   homeState
 	devs   deviceList
 	help   bool // ? ile açılan kısayol listesi
 
@@ -140,7 +143,8 @@ func New(cfg config.Config) Model {
 		m.spState = spNoClient
 	case m.sp.HasLogin():
 		m.spState = spReady
-		m.lib.loading = true // Init kitaplığı yüklemeye başlar
+		m.lib.loading = true // Init kitaplığı ve ana sayfayı yüklemeye başlar
+		m.home.loading = true
 	default:
 		m.spState = spLoggedOut
 	}
@@ -319,7 +323,7 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, startSoloist(m.cfg))
 	}
 	if m.spState == spReady {
-		cmds = append(cmds, m.loadMe(), m.loadLibrary())
+		cmds = append(cmds, m.loadMe(), m.loadLibrary(), m.loadHome())
 	}
 	return tea.Batch(cmds...)
 }
@@ -384,8 +388,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.say(msg.err.Error()), nil
 		}
 		m.spState, m.spErr = spReady, nil
-		m.lib.loading = true
-		return m, tea.Batch(m.loadMe(), m.loadLibrary(), m.enrich())
+		m.lib.loading, m.home.loading = true, true
+		return m, tea.Batch(m.loadMe(), m.loadLibrary(), m.loadHome(), m.enrich())
 
 	case meMsg:
 		if msg.err != nil {
@@ -411,6 +415,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case searchFireMsg, searchResultMsg:
 		return m.updateSearch(msg)
+
+	case homeMsg:
+		return m.updateHome(msg)
 
 	case coverMsg:
 		return m, nil // kapak artık bellekte; bir sonraki çizimde görünür
@@ -691,6 +698,8 @@ func (m Model) contentKey(k string) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	switch m.page {
+	case pageHome:
+		return m.homeKey(k)
 	case pageLibrary:
 		return m.libraryKey(k)
 	case pageDevices:
@@ -704,6 +713,9 @@ func (m *Model) enterPage() tea.Cmd {
 	if m.page == pageLibrary && m.spState == spReady && !m.lib.loaded && !m.lib.loading {
 		m.lib.loading = true
 		return m.loadLibrary()
+	}
+	if m.page == pageHome {
+		return m.maybeLoadHome()
 	}
 	if m.page == pageDevices && !m.devs.loading {
 		if cmd := m.loadDevices(); cmd != nil {
