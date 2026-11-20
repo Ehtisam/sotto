@@ -359,6 +359,13 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 	if id == setAutostart || id == setVolume {
 		note = T("set.saved.next") // bir sonraki açılışta geçerli
 	}
+	// Renkler ya da yerleşim değişince ekran baştan boyanır ve kapak resimlerinin
+	// üstü de boyanır: resimleri (boyut değişimindeki gibi) yeniden gönder.
+	switch id {
+	case setTheme, setAccent, setCovers, setBorder, setIcons, setProgress, setStrip, setLineNumbers, setLanguage:
+		m.rt.gfx.drawn = nil
+		return m.note(note), m.afterResize()
+	}
 	return m.note(note), nil
 }
 

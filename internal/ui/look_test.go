@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Ehtisam/sotto/internal/soloist"
@@ -86,4 +87,29 @@ func TestSettingsLookRowsApply(t *testing.T) {
 	}
 	m.cfg.Look.Icons = "unicode"
 	applyLook(m.cfg)
+}
+
+// Kullanıcı buldu: tema değişince kapak resmi kayboluyordu (ekran yeni
+// renklerle boyanıyor, resim yeniden gönderilmiyordu).
+func TestThemeChangeRedrawsCovers(t *testing.T) {
+	m := lookModel(t)
+	t.Cleanup(func() { applyLook(m.cfg) })
+	m.gfx.sixel, m.cfg.Look.Covers = true, "image"
+	m.rt.gfx.drawn = []gfxPlace{{}}
+	m, cmd := m.change(setTheme, 1)
+	if m.rt.gfx.drawn != nil || cmd == nil {
+		t.Fatalf("theme change: drawn %v cmd nil %v", m.rt.gfx.drawn, cmd == nil)
+	}
+	if !slicesContainsRedraw(runAll(cmd)) {
+		t.Fatal("no redraw scheduled")
+	}
+}
+
+func slicesContainsRedraw(msgs []tea.Msg) bool {
+	for _, msg := range msgs {
+		if _, ok := msg.(gfxRedrawMsg); ok {
+			return true
+		}
+	}
+	return false
 }
