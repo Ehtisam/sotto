@@ -25,6 +25,7 @@ func (m Model) moveInList(tl *trackList, d int) tea.Cmd {
 		return nil
 	}
 	tl.tracks[i], tl.tracks[j] = tl.tracks[j], tl.tracks[i]
+	tl.changed()
 	tl.cursor = j
 	tl.clamp(m.listHeight())
 	tl.moving = true

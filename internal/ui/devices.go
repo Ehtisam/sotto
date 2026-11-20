@@ -260,7 +260,7 @@ func (m Model) devicesView(w int) []string {
 	for i, r := range m.deviceRows() {
 		mark := "  "
 		if r.active {
-			mark = theme.GoldText.Render("♪ ")
+			mark = theme.Playing.Render(theme.Icon.Note + " ")
 		}
 		kind := r.kind
 		switch {

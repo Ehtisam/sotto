@@ -56,8 +56,8 @@ func TestHomeSections(t *testing.T) {
 	for _, it := range m.home.items {
 		kinds = append(kinds, it.kind)
 	}
-	// başlık, liste, albüm, beğenilenler, başlık, 4 farklı şarkı
-	want := []string{"header", "playlist", "album", "liked", "space", "header", "track", "track", "track", "track"}
+	// başlık, liste, albüm, beğenilenler, başlık, 4 farklı şarkı, "hepsini gör"
+	want := []string{"header", "playlist", "album", "liked", "space", "header", "track", "track", "track", "track", "more"}
 	if len(kinds) != len(want) {
 		t.Fatalf("kinds = %v", kinds)
 	}

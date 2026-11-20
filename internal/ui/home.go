@@ -156,12 +156,18 @@ func (m Model) homeItems() []searchItem {
 		tt := t
 		recent = append(recent, searchItem{kind: "track", name: t.Name, sub: t.ArtistNames() + "  " + ago(m.now, r.PlayedAt), uri: t.URI, track: &tt, ctx: ctx, history: true})
 	}
+	if len(recent) > 0 {
+		recent = append(recent, searchItem{kind: "more", name: "→ " + T("home.more.recent"), section: "recent"})
+	}
 	section("home.recent", recent)
 
 	var tops []searchItem
 	for i := range h.topTracks {
 		t := h.topTracks[i]
 		tops = append(tops, searchItem{kind: "track", name: t.Name, sub: t.ArtistNames(), uri: t.URI, track: &h.topTracks[i]})
+	}
+	if len(tops) > 0 {
+		tops = append(tops, searchItem{kind: "more", name: "→ " + T("home.more.top"), section: "top"})
 	}
 	section("home.toptracks", tops)
 
@@ -184,7 +190,7 @@ func (m Model) contextItem(r spotify.PlayHistory) (searchItem, bool) {
 				e = le
 			}
 		}
-		return searchItem{kind: "liked", name: "♥ " + e.name, sub: T("kind.collection"), uri: uri, entry: e}, true
+		return searchItem{kind: "liked", name: theme.Icon.Heart + " " + e.name, sub: T("kind.collection"), uri: uri, entry: e}, true
 	case "playlist":
 		for _, le := range m.lib.entries {
 			if le.uri == uri {
@@ -257,6 +263,14 @@ func (m Model) homeKey(k string) (Model, tea.Cmd, bool) {
 	case "enter", "right":
 		if len(h.items) == 0 {
 			return m, nil, true
+		}
+		if it := h.items[h.cursor]; it.kind == "more" {
+			p := extraRecent
+			if it.section == "top" {
+				p = extraTop
+			}
+			mm, cmd := m.openExtra(p)
+			return mm.(Model), cmd, true
 		}
 		tl, cmd := m.actOn(h.items[h.cursor])
 		if tl != nil {

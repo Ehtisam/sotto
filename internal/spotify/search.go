@@ -81,3 +81,20 @@ func (c *Client) AlbumTracks(ctx context.Context, album Album, offset, limit int
 	}
 	return p, err
 }
+
+// AlbumInfo, bir albümün bilgisi ve şarkı sayısı (bağlantıdan açılırken).
+func (c *Client) AlbumInfo(ctx context.Context, id string) (Album, int, error) {
+	var a struct {
+		Album
+		TotalTracks int `json:"total_tracks"`
+	}
+	err := c.get(ctx, "albums/"+url.PathEscape(id), &a)
+	return a.Album, a.TotalTracks, err
+}
+
+// Show, bir podcast'in bilgisi.
+func (c *Client) Show(ctx context.Context, id string) (Show, error) {
+	var s Show
+	err := c.get(ctx, "shows/"+url.PathEscape(id), &s)
+	return s, err
+}

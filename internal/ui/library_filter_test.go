@@ -104,6 +104,7 @@ func keyPress(k string) tea.KeyPressMsg {
 
 func TestNumberKeysGoIntoThePage(t *testing.T) {
 	m := profileModel(t)
+	m.km.Counts = false // sayılar açıkken içerikte rakam kısa bir süre bekler (keymap_test)
 	m.page, m.focus = pageHome, focusContent
 	mm, _ := m.key(keyPress("7"))
 	m = mm.(Model)

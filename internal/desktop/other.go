@@ -48,3 +48,17 @@ func RefreshIcons() bool { return false }
 
 // CleanupOld: yalnızca Windows.
 func CleanupOld() {}
+
+// ReadClipboard, panodaki metni okur (pbpaste, wl-paste, xclip ya da xsel).
+func ReadClipboard() (string, error) {
+	for _, c := range [][]string{{"pbpaste"}, {"wl-paste", "--no-newline"}, {"xclip", "-o", "-selection", "clipboard"}, {"xsel", "-ob"}} {
+		if _, err := exec.LookPath(c[0]); err != nil {
+			continue
+		}
+		out, err := exec.Command(c[0], c[1:]...).Output()
+		if err == nil {
+			return string(out), nil
+		}
+	}
+	return "", ErrUnsupported
+}

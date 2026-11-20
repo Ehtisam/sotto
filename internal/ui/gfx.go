@@ -98,7 +98,7 @@ func (m Model) cellRatio() float64 {
 }
 
 func groundRGB() [3]uint8 {
-	r, g, b, _ := theme.Ground.RGBA()
+	r, g, b, _ := theme.Solid().RGBA()
 	return [3]uint8{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)}
 }
 
@@ -269,7 +269,7 @@ func (m Model) gfxPlaceholder(url string, cols, rows int) string {
 	g := &m.rt.gfx
 	id := len(g.slots)
 	g.slots = append(g.slots, gfxSlot{url, cols, rows})
-	ground := lipgloss.NewStyle().Background(theme.Ground)
+	ground := lipgloss.NewStyle().Background(theme.Solid())
 	blank := ground.Render(strings.Repeat(" ", cols-1))
 	lines := make([]string, rows)
 	for y := range lines {
@@ -288,7 +288,7 @@ func (m Model) gfxPlaceholder(url string, cols, rows int) string {
 // sentinel, zemin renginin son bitleriyle oynanmış, gözle fark edilmeyen bir
 // renk: hangi alanın (id) hangi köşesi (which: 0 üst, 1 alt).
 func sentinel(id, which int) string {
-	r, g, b, _ := theme.Ground.RGBA()
+	r, g, b, _ := theme.Solid().RGBA()
 	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, (b>>8)^uint32(1+id*2+which))
 }
 

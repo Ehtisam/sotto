@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -27,6 +28,10 @@ type Config struct {
 	Extras   Extras  `toml:"extras"`
 	Desktop  Desktop `toml:"desktop"`
 	Hooks    Hooks   `toml:"hooks"`
+
+	// Colors: temanın üstüne öğe öğe renkler ("text" = "#e8e0d0"). Anahtarlar
+	// theme.ColorKeys'te.
+	Colors map[string]string `toml:"colors"`
 
 	// Doldurulan yollar (dosyada yok).
 	ConfigDir string `toml:"-"`
@@ -42,6 +47,16 @@ type Look struct {
 	// CellRatio, hücrenin gerçek en/boy oranı; 0: kendiliğinden. Kapaklar
 	// kare görünmüyorsa elle ayarlanır (ör. 0.45).
 	CellRatio float64 `toml:"cell_ratio"`
+
+	LineNumbers string `toml:"line_numbers"` // absolute, relative ya da off
+	Border      string `toml:"border"`       // line, heavy, double, dashed, ascii ya da none
+	Icons       string `toml:"icons"`        // unicode, ascii ya da nerd
+	Strip       string `toml:"strip"`        // çalan şarkı şeridi: bottom ya da top
+	StripFormat string `toml:"strip_format"` // şeridin ilk satırı: {title} {artist} {album} {context} {device}
+	Progress    string `toml:"progress"`     // ilerleme çubuğu: line, block, dots ya da thin
+	WindowTitle string `toml:"window_title"` // pencere başlığı; aynı alanlar
+	Mouse       bool   `toml:"mouse"`        // fare: tıklama ve tekerlek
+	Visualizer  string `toml:"visualizer"`   // ses görselleştirmesi: now, strip ya da off
 }
 
 // CoversOn: kapaklar çizilsin mi.
@@ -89,8 +104,15 @@ type Soloist struct {
 	Enabled *bool `toml:"enabled"`
 }
 
+// Görünüm varsayılanları.
+const (
+	DefaultStripFormat = "{title} — {artist}"
+	DefaultWindowTitle = "{title} — {artist} · sotto"
+)
+
 func defaults() Config {
-	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "image"}, Soloist: Soloist{Autostart: true, Resume: true, AutoUpdate: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true},
+	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "image", LineNumbers: "absolute", Border: "line",
+		Icons: "unicode", Strip: "bottom", StripFormat: DefaultStripFormat, Progress: "line", WindowTitle: DefaultWindowTitle, Mouse: true, Visualizer: "now"}, Soloist: Soloist{Autostart: true, Resume: true, AutoUpdate: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true},
 		Desktop: Desktop{Notify: "unfocused", NotifyTitle: "{title}", NotifyBody: "{artist} · {album}", MediaControls: true, StartMenu: true}}
 }
 
@@ -121,7 +143,7 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("%s: %w", c.ConfigFile(), err)
 		}
 		// Yeni sürümle gelen bölümler dosyada yoksa açıklamalarıyla eklensin.
-		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]", "[desktop]", "[hooks]", "resume =", "auto_update =", "start_menu ="} {
+		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]", "[desktop]", "[hooks]", "resume =", "auto_update =", "start_menu =", "line_numbers =", "[colors]", "visualizer ="} {
 			if !strings.Contains(string(b), section) {
 				exists = false
 			}
@@ -174,6 +196,15 @@ func (c Config) Save() error {
 		quote(c.Look.Accent),
 		quote(c.Look.Covers),
 		c.Look.CellRatio,
+		quote(c.Look.LineNumbers),
+		quote(c.Look.Border),
+		quote(c.Look.Icons),
+		quote(c.Look.Strip),
+		quote(c.Look.StripFormat),
+		quote(c.Look.Progress),
+		quote(c.Look.WindowTitle),
+		c.Look.Mouse,
+		quote(c.Look.Visualizer),
 		quote(c.Spotify.ClientID),
 		c.Soloist.Autostart,
 		c.Soloist.Resume,
@@ -191,6 +222,7 @@ func (c Config) Save() error {
 		quote(c.Hooks.OnTrackChange),
 		quote(c.Hooks.OnStatusChange),
 	)
+	text += colorsSection(c.Colors)
 	return os.WriteFile(c.ConfigFile(), []byte(text), 0o600)
 }
 
@@ -213,6 +245,30 @@ covers = %s
 # 0 works it out (0.45 on Windows Terminal). Set it by hand if covers look
 # stretched, e.g. 0.42 makes them wider, 0.5 taller.
 cell_ratio = %g
+# Numbers in front of songs: "absolute", "relative" (distance from the
+# selected row, like vim's relativenumber) or "off".
+line_numbers = %s
+# Lines between the parts of the screen: "line", "heavy", "double", "dashed",
+# "ascii" or "none".
+border = %s
+# Symbols: "unicode" (♪ ⇄ ↻ ♥), "ascii" (for fonts without them) or "nerd"
+# (Nerd Font icons).
+icons = %s
+# Where the now-playing strip sits: "bottom" or "top".
+strip = %s
+# First line of the strip. Fields: {title} {artist} {album} {context} {device}.
+strip_format = %s
+# Progress bar: "line" (━──), "block" (██░░), "dots" (●○○) or "thin" (──•──).
+progress = %s
+# Terminal window title; same fields. Empty leaves the title alone.
+window_title = %s
+# Mouse: click a page or a row, click the progress bar to seek, scroll lists,
+# scroll over the strip to change the volume. Turn off to select text freely.
+mouse = %t
+# Audio visualizer: "now" (bars on the Now playing page), "strip" (a small
+# one in the strip) or "off". It listens to what this computer plays (Windows),
+# so it moves while music plays here, through Soloist.
+visualizer = %s
 
 [spotify]
 # Client ID of your own Spotify app (https://developer.spotify.com/dashboard).
@@ -303,4 +359,27 @@ func (c Config) SoloistAPIKey() string {
 		return k
 	}
 	return strings.TrimSpace(c.Soloist.APIKey)
+}
+
+// colorsSection, [colors] bölümü: verilen renkler ve kullanılabilecek anahtarlar.
+func colorsSection(colors map[string]string) string {
+	var b strings.Builder
+	b.WriteString(`
+[colors]
+# Your own colours over the theme, one element at a time, as "#rrggbb" or a
+# terminal colour number "0"-"15". Keys: ground, text, muted, line, accent,
+# accent_hi, selected, gold, red, and for single parts of the screen:
+# brand (the sotto name), title, playing (♪ and the playing song), progress,
+# selected_text, hint_key, hint_text, border.
+# Example:  accent = "#e0a040"
+`)
+	keys := make([]string, 0, len(colors))
+	for k := range colors {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s = %s\n", k, quote(colors[k]))
+	}
+	return b.String()
 }

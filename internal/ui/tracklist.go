@@ -59,7 +59,16 @@ type trackList struct {
 	err     error
 	cursor  int
 	scroll  int
-	moving  bool // şarkı taşıma isteği yolda
+	moving  bool   // şarkı taşıma isteği yolda
+	seek    string // c: bulunana kadar sayfa yüklenen şarkı
+
+	find   finder // sayfa içi arama (find.go)
+	sortBy string // sıralama (sort.go); "" listenin kendi sırası
+	desc   bool
+
+	ver      int // şarkılar değişince artar (görünüm önbelleği için)
+	cache    []int
+	cacheKey viewKey
 }
 
 const pageSize = 50
@@ -80,6 +89,9 @@ type playedMsg struct {
 // openList, bir topluluğu açar ve ilk sayfasını ister.
 func (m Model) openList(e libEntry) (*trackList, tea.Cmd) {
 	tl := &trackList{entry: e, total: e.total, loading: true}
+	if s, ok := m.rt.sorts[e.key]; ok && e.key != "" {
+		tl.sortBy, tl.desc = s.By, s.Desc
+	}
 	return tl, m.loadTracks(e, 0)
 }
 
@@ -98,7 +110,9 @@ func (m Model) loadTracks(e libEntry, offset int) tea.Cmd {
 			}
 			msg.total = p.Total
 			for _, it := range p.Items {
-				msg.tracks = append(msg.tracks, it.Track)
+				t := it.Track
+				t.AddedAt = it.AddedAt
+				msg.tracks = append(msg.tracks, t)
 			}
 		case kindShow:
 			p, err := sp.ShowEpisodes(ctx, e.key, offset, pageSize)
@@ -128,7 +142,9 @@ func (m Model) loadTracks(e libEntry, offset int) tea.Cmd {
 			msg.total = p.Total
 			for _, it := range p.Items {
 				if t := it.T(); t != nil && t.URI != "" {
-					msg.tracks = append(msg.tracks, *t)
+					tt := *t
+					tt.AddedAt = it.AddedAt
+					msg.tracks = append(msg.tracks, tt)
 				}
 			}
 		}
@@ -165,11 +181,20 @@ func (tl *trackList) remove(uri string) {
 		tl.total -= removed
 	}
 	tl.tracks = out
+	tl.changed()
 	tl.cursor = max(0, min(tl.cursor, len(tl.tracks)-1))
 }
 
+// clamp, imleci görünen satırlar içinde ve ekranda tutar.
 func (tl *trackList) clamp(h int) {
-	tl.cursor, tl.scroll = fitScroll(tl.cursor, tl.scroll, len(tl.tracks), h)
+	n := tl.rows()
+	if n == 0 {
+		tl.scroll = 0
+		return
+	}
+	p := max(tl.pos(), 0)
+	p, tl.scroll = fitScroll(p, tl.scroll, n, h)
+	tl.cursor = tl.at(p)
 }
 
 // fitScroll, imleci görünür tutacak şekilde kaydırmayı ayarlar.
@@ -189,7 +214,11 @@ func fitScroll(cursor, scroll, n, h int) (int, int) {
 func (m Model) listKey(tl *trackList, k string) (cmd tea.Cmd, handled, back bool) {
 	h := m.listHeight()
 	move := func(d int) {
-		tl.cursor = max(0, min(len(tl.tracks)-1, tl.cursor+d))
+		n := tl.rows()
+		if n == 0 {
+			return
+		}
+		tl.cursor = tl.at(max(0, min(n-1, max(tl.pos(), 0)+d)))
 		tl.clamp(h)
 	}
 	switch k {
@@ -206,7 +235,7 @@ func (m Model) listKey(tl *trackList, k string) (cmd tea.Cmd, handled, back bool
 	case "end", "G":
 		move(1 << 30)
 	case "enter", "right":
-		if len(tl.tracks) == 0 {
+		if tl.rows() == 0 {
 			return nil, true, false
 		}
 		return m.playFrom(tl.entry, tl.tracks, tl.cursor), true, false
@@ -215,6 +244,9 @@ func (m Model) listKey(tl *trackList, k string) (cmd tea.Cmd, handled, back bool
 		d := 1
 		if k == "K" {
 			d = -1
+		}
+		if !tl.natural() {
+			return func() tea.Msg { return flashMsg(T("find.nomove")) }, true, false
 		}
 		return m.moveInList(tl, d), true, false
 	case "x", "delete":
@@ -225,7 +257,7 @@ func (m Model) listKey(tl *trackList, k string) (cmd tea.Cmd, handled, back bool
 		return nil, false, false
 	}
 	// Sonuna yaklaşınca sonraki sayfayı getir.
-	if !tl.loading && len(tl.tracks) < tl.total && tl.cursor >= len(tl.tracks)-10 {
+	if !tl.loading && len(tl.tracks) < tl.total && max(tl.pos(), 0) >= tl.rows()-10 {
 		tl.loading = true
 		return m.loadTracks(tl.entry, len(tl.tracks)), true, false
 	}
@@ -319,7 +351,7 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 	if e.kind == kindShow {
 		count = " · " + F("search.episodecount", tl.total)
 	}
-	info := theme.Dim.Render(sub) + theme.Faint.Render(count)
+	info := theme.Dim.Render(sub) + theme.Faint.Render(count) + theme.Faint.Render(sortLabel(tl.sortBy, tl.desc))
 	if e.kind == kindPlaylist && m.editable(e) {
 		info += theme.Faint.Render(T("pl.move") + T("pl.x"))
 	}
@@ -339,11 +371,13 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 	if e.desc != "" && e.kind != kindAlbum {
 		desc = theme.Dim.Italic(true).Render(truncate(e.desc, textW))
 	}
-	head := []string{theme.Title.Render(truncate(e.name, textW)), info, desc, ""}
+	head := []string{theme.Title.Render(truncate(e.name, textW)), info, desc}
 	if img != "" {
 		block := lipgloss.JoinHorizontal(lipgloss.Top, m.coverBox(img, cw, ch), "  ", strings.Join(head, "\n"))
-		head = append(strings.Split(block, "\n")[:ch], "")
+		head = strings.Split(block, "\n")[:ch]
 	}
+	// Başlığın altındaki boş satır: sayfa içi arama açıksa onun yazısı.
+	head = append(head, findBar(tl.find, tl.rows(), len(tl.tracks), w))
 	rows := head
 	if len(tl.tracks) == 0 && tl.loading {
 		return append(rows, theme.Dim.Render(T("lib.loading")))
@@ -352,12 +386,31 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 	if m.state.Item != nil {
 		playing = m.state.Item.URI
 	}
-	end := min(len(tl.tracks), tl.scroll+m.listHeight())
-	for i := tl.scroll; i < end; i++ {
+	n := tl.rows()
+	if n == 0 && tl.find.query != "" {
+		rows = append(rows, theme.Dim.Render(T("find.none")))
+	}
+	end := min(n, tl.scroll+m.listHeight())
+	cur := tl.pos()
+	numW := 5 // "123  "; numaralar kapalıyken yalnızca ♪ için iki sütun
+	if m.cfg.Look.LineNumbers == "off" {
+		numW = 2
+	}
+	for p := tl.scroll; p < end; p++ {
+		i := tl.at(p)
 		t := tl.tracks[i]
-		num := theme.Faint.Render(fmt.Sprintf("%3d  ", i+1))
-		if t.URI == playing {
-			num = theme.GoldText.Render("  ♪  ")
+		var num string
+		switch {
+		case t.URI == playing && numW == 2:
+			num = theme.Playing.Render(theme.Icon.Note + " ")
+		case t.URI == playing:
+			num = theme.Playing.Render(fmt.Sprintf("%3s  ", theme.Icon.Note))
+		case numW == 2:
+			num = "  "
+		case m.cfg.Look.LineNumbers == "relative" && active && p == cur:
+			num = theme.Dim.Render(fmt.Sprintf("%-3s  ", m.lineNumber(i+1, p, cur, active)))
+		default:
+			num = theme.Faint.Render(fmt.Sprintf("%3s  ", m.lineNumber(i+1, p, cur, active)))
 		}
 		right := clock(time.Duration(t.DurationMS) * time.Millisecond)
 		switch e.kind {
@@ -367,9 +420,9 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 		default:
 			right = t.ArtistNames() + "  " + right
 		}
-		rows = append(rows, num+row(t.Name, right, w-5, active && i == tl.cursor))
+		rows = append(rows, num+row(t.Name, right, w-numW, active && i == tl.cursor))
 	}
-	if tl.loading && len(tl.tracks) > 0 && end == len(tl.tracks) {
+	if tl.loading && len(tl.tracks) > 0 && end == n {
 		rows = append(rows, theme.Faint.Render("     "+T("lib.loading")))
 	}
 	return rows

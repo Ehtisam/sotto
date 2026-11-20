@@ -52,8 +52,8 @@ func TestSettingsThemeAppliesAndSaves(t *testing.T) {
 	}
 	m, _, _ = m.settingsKey("left")
 	m, _, _ = m.settingsKey("left") // cardo'dan geriye: son tema
-	if m.cfg.Look.Theme != "paper" {
-		t.Fatalf("left wraps to %q, want paper", m.cfg.Look.Theme)
+	if m.cfg.Look.Theme != "terminal" {
+		t.Fatalf("left wraps to %q, want terminal", m.cfg.Look.Theme)
 	}
 }
 

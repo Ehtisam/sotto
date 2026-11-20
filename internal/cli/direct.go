@@ -63,7 +63,7 @@ func Direct(ctx context.Context, sp *spotify.Client, req ipc.Request, stdin io.R
 		return errOr(wrap, sp.Next(ctx), "")
 	case "prev":
 		return errOr(wrap, sp.Previous(ctx), "")
-	case "seek", "vol", "shuffle", "repeat", "status", "like", "unlike":
+	case "seek", "vol", "mute", "shuffle", "repeat", "status", "like", "unlike":
 		st, err := sp.Player(ctx)
 		if err != nil {
 			return wrap(err)
@@ -128,6 +128,22 @@ func withStatus(ctx context.Context, sp *spotify.Client, cmd string, f flags, cu
 			return ipc.Fail(errors.New(RefusalText("volume", cur.Device)))
 		}
 		return errOr(wrap, sp.SetVolume(ctx, v), "")
+	case "mute":
+		want := f.arg(0)
+		if want != "" && want != "on" && want != "off" {
+			return ipc.Fail(fmt.Errorf("expected on or off, got %q", want))
+		}
+		if refuse("volume") {
+			return ipc.Fail(errors.New(RefusalText("volume", cur.Device)))
+		}
+		v, save, muted := MuteTarget(cur.Volume, MutedVolume(StateDir), want)
+		if v != cur.Volume {
+			if err := sp.SetVolume(ctx, v); err != nil {
+				return wrap(err)
+			}
+		}
+		SaveMuted(StateDir, save)
+		return ipc.Done(MuteText(muted, v), map[string]any{"muted": muted, "volume": v})
 	case "shuffle":
 		on, err := ParseOnOff(f.arg(0), cur.Shuffle)
 		if err != nil {
@@ -710,3 +726,6 @@ func Matches(line, title, artists string) bool {
 	}
 	return share(line) >= 0.5
 }
+
+// Fold, metni karşılaştırma için sadeleştirir: küçük harf, aksansız.
+func Fold(s string) string { return fold.Replace(strings.ToLower(s)) }

@@ -59,7 +59,7 @@ func TestRecentSearches(t *testing.T) {
 	}
 	m.search.typing = false
 	m.search.cursor = 2 // Band
-	mm, _, ok := m.searchKey(keyPress("x"))
+	mm, _, ok := m.searchKey(keyPress("x"), "x")
 	if !ok || len(mm.search.recent) != 2 || mm.search.recent[1].Name != "Mix" {
 		t.Fatalf("after x: %+v", mm.search.recent)
 	}
@@ -94,7 +94,7 @@ func TestSearchRetypeAfterEsc(t *testing.T) {
 	m = m.enterSearch()
 	m.search.query, m.search.last = "tarkan", "tarkan"
 	m.search.items = []searchItem{{kind: "track", name: "x", uri: "u"}}
-	m, _, _ = m.searchKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, _, _ = m.searchKey(tea.KeyPressMsg{Code: tea.KeyEscape}, "esc")
 	if m.search.last != "" || m.search.query != "" {
 		t.Fatalf("esc: query %q last %q", m.search.query, m.search.last)
 	}
@@ -107,7 +107,7 @@ func TestSearchRetypeAfterEsc(t *testing.T) {
 
 func typeText2(m Model, s string) Model {
 	for _, r := range s {
-		m, _, _ = m.searchKey(tea.KeyPressMsg{Text: string(r), Code: r})
+		m, _, _ = m.searchKey(tea.KeyPressMsg{Text: string(r), Code: r}, string(r))
 	}
 	return m
 }

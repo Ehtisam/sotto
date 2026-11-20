@@ -35,6 +35,7 @@ const (
 	actOpenFolder
 	actRenameFolder
 	actMoveFolder
+	actShuffle
 )
 
 type menuItem struct {
@@ -80,7 +81,16 @@ type actionDoneMsg struct {
 func (m Model) actionTarget() (searchItem, *libEntry, bool) {
 	if m.focus == focusContent {
 		var tl *trackList
-		switch m.page {
+		page := m.page
+		if m.extraOn() { // ek sayfa: kendi satırları ya da açılan liste
+			page = -1
+			x := m.extra
+			tl = x.open
+			if tl == nil && x.page != extraLog && x.cursor < len(x.items) && x.items[x.cursor].selectable() {
+				return x.items[x.cursor], nil, true
+			}
+		}
+		switch page {
 		case pageLibrary:
 			tl = m.lib.open
 			if vis := m.libVisible(); tl == nil && len(vis) > 0 {
@@ -106,7 +116,7 @@ func (m Model) actionTarget() (searchItem, *libEntry, bool) {
 				return it, nil, true
 			}
 		}
-		if tl != nil && len(tl.tracks) > 0 {
+		if tl != nil && len(tl.tracks) > 0 && tl.rows() > 0 {
 			t := tl.tracks[tl.cursor]
 			from := tl.entry
 			return trackItem(t), &from, true
@@ -200,6 +210,10 @@ func (m Model) menuItems() []menuItem {
 	case "album", "playlist", "show", "liked":
 		add(actOpen, "o", "act.open")
 		add(actPlay, "p", "act.play")
+		if t.kind != "show" {
+			add(actShuffle, "S", "act.shuffle")
+		}
+		add(actQueue, "q", "act.queue.all")
 		if t.kind == "playlist" {
 			if m.editable(t.entry) {
 				add(actEdit, "e", "act.edit")
@@ -219,6 +233,7 @@ func (m Model) menuItems() []menuItem {
 		}
 	case "artist":
 		add(actPlay, "p", "act.play")
+		add(actShuffle, "S", "act.shuffle")
 		if m.cfg.Extras.Enabled {
 			add(actRadio, "g", "act.radio.artist")
 		}
@@ -359,10 +374,9 @@ func (m Model) runAction(id actID) (Model, tea.Cmd) {
 
 	switch id {
 	case actQueue:
-		if m.soloistActive() && t.kind == "track" {
-			return m, m.soloistAction(func(ctx context.Context, c *soloist.Client) error { return c.AddToQueue(ctx, uri) }, T("act.queued"))
-		}
-		return m, m.spotifyAction(func(ctx context.Context, sp *spotify.Client) error { return sp.AddToQueue(ctx, uri) }, T("act.queued"))
+		return m.queueItem(t)
+	case actShuffle:
+		return m.shuffleTarget(t, from)
 	case actLike:
 		return m, m.spotifyAction(func(ctx context.Context, sp *spotify.Client) error { return sp.Save(ctx, []string{uri}) }, T("act.liked"))
 	case actUnlike:

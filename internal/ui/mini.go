@@ -109,7 +109,7 @@ func (m Model) miniView() string {
 	}
 	// Söylenen söz satırı (sığarsa, sözler biliniyorsa).
 	if line := m.miniLyric(); line != "" && h-len(top)-len(bottom) >= 2 {
-		bottom = append([]string{theme.GoldText.Render(truncate("♪ "+line, iw))}, bottom...)
+		bottom = append([]string{theme.Playing.Render(truncate(theme.Icon.Note+" "+line, iw))}, bottom...)
 	}
 
 	rows := top
@@ -144,11 +144,11 @@ func (m Model) miniView() string {
 func (m Model) miniIcon() string {
 	switch {
 	case m.state.Item == nil:
-		return theme.Faint.Render("·")
+		return theme.Faint.Render(theme.Icon.Idle)
 	case m.playing():
-		return theme.GoldText.Render("❚❚")
+		return theme.Playing.Render(theme.Icon.Pause)
 	}
-	return theme.Dim.Render("▶")
+	return theme.Dim.Render(theme.Icon.Play)
 }
 
 func (m Model) miniStatus(w int) string {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Ehtisam/sotto/internal/cli"
 	"github.com/Ehtisam/sotto/internal/i18n"
+	"github.com/Ehtisam/sotto/internal/keys"
 	"github.com/Ehtisam/sotto/internal/soloist"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
 )
@@ -28,9 +29,12 @@ func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.ReportFocus = true // bildirimler yalnızca pencere arkadayken (ayara göre)
+	if m.cfg.Look.Mouse {
+		v.MouseMode = tea.MouseModeCellMotion // mouse.go
+	}
 	v.BackgroundColor = theme.Ground
 	v.ForegroundColor = theme.Text
-	v.WindowTitle = m.windowTitle()
+	v.WindowTitle = m.windowTitleText()
 	// Terminalden tuşların basılma/bırakılma bilgisini iste (kitty klavye
 	// protokolü): böylece shift'e tek başına basıldığı duyulur ve alt satır
 	// shift'le çalışan tuşları gösterir. Desteklemeyen terminal yok sayar.
@@ -63,20 +67,16 @@ func (m Model) render() string {
 		m.rt.out.setAfter(m.stripsAfter(screen))
 		return screen
 	}
-	rule := theme.Faint.Render(strings.Repeat("─", w))
+	rule := theme.Rule(w)
 
 	// Sabit satırlar: başlık, çizgi, çizgi, şerit (2), boş, kısayollar.
 	bodyH := max(h-7, 1)
 
-	screen := strings.Join([]string{
-		m.header(w),
-		rule,
-		m.body(w, bodyH),
-		rule,
-		m.strip(w),
-		"",
-		m.hints(w),
-	}, "\n")
+	parts := []string{m.header(w), rule, m.body(w, bodyH), rule, m.strip(w), "", m.hints(w)}
+	if m.stripTop() { // şerit üstte: başlığın altında
+		parts = []string{m.header(w), rule, m.strip(w), rule, m.body(w, bodyH), "", m.hints(w)}
+	}
+	screen := strings.Join(parts, "\n")
 	m.rt.gfx.placed = findPlaces(screen, m.rt.gfx.slots)
 	m.rt.out.setAfter(m.stripsAfter(screen))
 	return screen
@@ -97,7 +97,7 @@ func (m Model) header(w int) string {
 func (m Model) deviceStatus() string {
 	// Kumanda: başka bir cihazda çalıyor.
 	if m.remote.active && m.remote.device != "" {
-		return theme.GoldText.Render("♪ ") + theme.Plain.Render(m.remote.device) + theme.Dim.Render(T("dev.remote"))
+		return theme.Playing.Render(theme.Icon.Note+" ") + theme.Plain.Render(m.remote.device) + theme.Dim.Render(T("dev.remote"))
 	}
 	switch m.engine {
 	case engineOff:
@@ -118,7 +118,7 @@ func (m Model) deviceStatus() string {
 		name = "sotto"
 	}
 	if m.auth.IsActive {
-		return theme.GoldText.Render("♪ ") + theme.Plain.Render(name) + theme.Dim.Render(T("dev.light"))
+		return theme.Playing.Render(theme.Icon.Note+" ") + theme.Plain.Render(name) + theme.Dim.Render(T("dev.light"))
 	}
 	return theme.Dim.Render(name + T("dev.inactive"))
 }
@@ -189,8 +189,12 @@ func (m Model) content(w, h int) string {
 		rows = m.playlistFormView(w)
 	case m.actions.open:
 		rows = m.actionsView(w)
+	case m.sortm.open:
+		rows = m.sortView(w)
 	case m.help:
-		rows = m.helpView(w)
+		rows = m.helpView(w, h)
+	case m.extraOn():
+		rows = m.extraView(w)
 	case m.page == pageNow:
 		rows = m.nowPlaying(w, h)
 	case m.page == pageLibrary:
@@ -291,6 +295,21 @@ func (m Model) nowInfo(w, h int) []string {
 		rows = append(rows, "", theme.Faint.Render(truncate(F("now.remote", m.remote.device), w)))
 	case m.soloistLive() && !m.auth.IsActive:
 		rows = append(rows, "", theme.Dim.Render(truncate(T("now.inactive"), w)))
+	}
+
+	// Ses görselleştirmesi (Soloist çalarken).
+	if m.cfg.Look.Visualizer == "now" && m.vizWanted() {
+		vh := 0
+		switch {
+		case h-len(rows) > 14:
+			vh = 4
+		case h-len(rows) > 9:
+			vh = 2
+		}
+		if bars := m.vizBars(min(w, 64), vh); len(bars) > 0 {
+			rows = append(rows, "")
+			rows = append(rows, bars...)
+		}
 	}
 
 	// Sözler (varsa) ya da sıradakiler; l ikisi arasında geçer.
@@ -399,24 +418,21 @@ func (m Model) strip(w int) string {
 	switch m.state.Status {
 	// Spotify'daki gibi düğme: basınca ne olacağını gösterir (çalarken duraklat).
 	case soloist.StatusPlaying:
-		icon = theme.GoldText.Render("❚❚")
+		icon = theme.Playing.Render(theme.Icon.Pause)
 	case soloist.StatusBuffering:
-		icon = theme.Dim.Render("…")
+		icon = theme.Dim.Render(theme.Icon.Buffering)
 	case soloist.StatusPaused:
-		icon = theme.Dim.Render("▶")
+		icon = theme.Dim.Render(theme.Icon.Play)
 	default:
-		icon = theme.Faint.Render("·")
+		icon = theme.Faint.Render(theme.Icon.Idle)
 	}
 
-	name, artists, _ := m.describe(it)
+	name, _, _ := m.describe(it)
 	var line1 string
 	if name == "" {
 		line1 = icon + "  " + theme.Faint.Render(T("strip.nothing"))
 	} else {
-		line1 = icon + "  " + theme.Title.Render(name)
-		if artists != "" {
-			line1 += theme.Dim.Render(" — " + artists)
-		}
+		line1 = icon + "  " + m.stripLine()
 	}
 	right := ""
 	if m.flash != "" {
@@ -425,6 +441,8 @@ func (m Model) strip(w int) string {
 			style = theme.GoldText
 		}
 		right = style.Render(truncate(m.flash, inner*2/3))
+	} else if v := m.vizMini(16); v != "" {
+		right = v
 	} else if ctx := m.state.Context; ctx != nil && ctx.Name() != "" {
 		right = theme.Faint.Render(ctx.Name())
 	}
@@ -433,6 +451,9 @@ func (m Model) strip(w int) string {
 	// İlerleme çubuğu, süre, ses, karıştır, tekrar.
 	pos, dur := m.position(), it.Duration()
 	vol := theme.Plain.Render(fmt.Sprint(m.state.Volume))
+	if m.muted() {
+		vol = theme.Dim.Render(theme.Icon.Muted + " " + T("strip.muted"))
+	}
 	if m.remote.active && cli.Disallowed(m.remote.player, "volume", "") {
 		vol = theme.Faint.Render(fmt.Sprint(m.state.Volume)) // cihaz uzaktan ses değiştirtmiyor
 	}
@@ -443,6 +464,7 @@ func (m Model) strip(w int) string {
 	left := theme.Dim.Render(clock(pos)) + " "
 	rightTime := " " + theme.Dim.Render(clock(dur))
 	barW := inner - lipgloss.Width(left) - lipgloss.Width(rightTime) - lipgloss.Width(extras)
+	m.rt.bar = barZone{x: margin + lipgloss.Width(left), w: max(barW, 4)}
 	line2 := left + bar(pos, dur, max(barW, 4)) + rightTime + extras
 
 	pad := strings.Repeat(" ", margin)
@@ -451,19 +473,19 @@ func (m Model) strip(w int) string {
 
 func (m Model) shuffleMark() string {
 	if m.state.Options.Shuffle {
-		return theme.Hi.Render("⇄")
+		return theme.Hi.Render(theme.Icon.Shuffle)
 	}
-	return theme.Faint.Render("⇄")
+	return theme.Faint.Render(theme.Icon.Shuffle)
 }
 
 func (m Model) repeatMark() string {
 	switch m.state.Options.Repeat {
 	case "context":
-		return theme.Hi.Render("↻")
+		return theme.Hi.Render(theme.Icon.Repeat)
 	case "track":
-		return theme.Hi.Render("↻1")
+		return theme.Hi.Render(theme.Icon.RepeatOne)
 	}
-	return theme.Faint.Render("↻")
+	return theme.Faint.Render(theme.Icon.Repeat)
 }
 
 func bar(pos, dur time.Duration, w int) string {
@@ -471,8 +493,7 @@ func bar(pos, dur time.Duration, w int) string {
 	if dur > 0 {
 		filled = int(float64(w) * float64(pos) / float64(dur))
 	}
-	filled = max(0, min(w, filled))
-	return theme.Hi.Render(strings.Repeat("━", filled)) + theme.Faint.Render(strings.Repeat("─", w-filled))
+	return theme.Bar(filled, w)
 }
 
 // ---- kısayollar ----
@@ -502,11 +523,20 @@ func (m Model) hints(w int) string {
 		hs = []hint{{"↑ ↓", T("hint.select")}, {T("hint.type"), T("hint.edit")}, {"← →", T("hint.change")}, {"ctrl+s", T("pl.save")}, {"esc", T("hint.close")}}
 		parts := make([]string, len(hs))
 		for i, h := range hs {
-			parts[i] = theme.Dim.Render(h.key) + " " + theme.Faint.Render(h.verb)
+			parts[i] = theme.HintKey.Render(h.key) + " " + theme.HintText.Render(h.verb)
 		}
 		return ansi.Truncate(strings.Repeat(" ", margin)+strings.Join(parts, theme.Faint.Render(" · ")), w, "…")
 	}
-	if m.actions.open {
+	if f := m.shownFinder(); f != nil && f.typing && !m.actions.open && !m.sortm.open && !m.help {
+		// Sayfa içi aramaya yazarken.
+		hs = []hint{{T("hint.type"), T("find.hint")}, {"enter ↓", T("hint.results")}, {"ctrl+u", T("find.clear")}, {"esc", T("hint.close")}}
+		parts := make([]string, len(hs))
+		for i, h := range hs {
+			parts[i] = theme.HintKey.Render(h.key) + " " + theme.HintText.Render(h.verb)
+		}
+		return ansi.Truncate(strings.Repeat(" ", margin)+strings.Join(parts, theme.Faint.Render(" · ")), w, "…")
+	}
+	if m.actions.open || m.sortm.open {
 		hs = []hint{{"↑ ↓", T("hint.select")}, {"enter", T("hint.do")}, {"esc", T("hint.close")}}
 	} else if m.help {
 		hs = []hint{{"esc", T("hint.close")}}
@@ -515,7 +545,7 @@ func (m Model) hints(w int) string {
 		hs = []hint{{T("hint.type"), T("hint.tosearch")}, {"tab", T("hint.filter")}, {"enter ↓", T("hint.results")}, {"esc", T("hint.back")}}
 		parts := make([]string, len(hs))
 		for i, h := range hs {
-			parts[i] = theme.Dim.Render(h.key) + " " + theme.Faint.Render(h.verb)
+			parts[i] = theme.HintKey.Render(h.key) + " " + theme.HintText.Render(h.verb)
 		}
 		return ansi.Truncate(strings.Repeat(" ", margin)+strings.Join(parts, theme.Faint.Render(" · ")), w, "…")
 	} else if m.focus == focusContent {
@@ -531,6 +561,9 @@ func (m Model) hints(w int) string {
 		case m.page == pageSettings:
 			hs = []hint{{"↑ ↓", T("hint.select")}, {"← →", T("hint.change")}}
 		}
+		if m.shownFinder() != nil {
+			hs = append(hs, hint{"/", T("find.hint")}, hint{"⇧O", T("sort.hint")})
+		}
 		hs = append(hs, hint{"esc", T("hint.back")}, hint{"1–8", T("hint.pages")})
 	} else {
 		hs = []hint{{"↑ ↓", T("hint.page")}, {"1–8", T("hint.pages")}}
@@ -538,15 +571,20 @@ func (m Model) hints(w int) string {
 			hs = append(hs, hint{"enter", T("hint.enter")})
 		}
 	}
+	pair := func(a, b string) string { return strings.TrimSpace(m.kn(a) + " " + m.kn(b)) }
 	hs = append(hs,
-		hint{T("key.space"), T("hint.pause")}, hint{"n p", T("hint.skip")},
-		hint{"t", T("hint.switch")}, hint{"o", T("hint.solo")},
-		hint{", .", T("hint.seek")}, hint{"+ −", T("hint.vol")},
-		hint{"s", T("hint.shuf")}, hint{"r", T("hint.rep")}, hint{"q", T("hint.quit")},
+		hint{m.kn("play_pause"), T("hint.pause")}, hint{pair("next", "previous"), T("hint.skip")},
+		hint{m.kn("switch_speaker"), T("hint.switch")}, hint{m.kn("soloist"), T("hint.solo")},
+		hint{pair("seek_back", "seek_forward"), T("hint.seek")}, hint{pair("volume_up", "volume_down"), T("hint.vol")},
+		hint{m.kn("mute"), T("hint.mute")}, hint{m.kn("like"), T("hint.like")},
+		hint{m.kn("shuffle"), T("hint.shuf")}, hint{m.kn("repeat"), T("hint.rep")}, hint{m.kn("quit"), T("hint.quit")},
 	)
-	render := func(h hint) string { return theme.Dim.Render(h.key) + " " + theme.Faint.Render(h.verb) }
+	render := func(h hint) string { return theme.HintKey.Render(h.key) + " " + theme.HintText.Render(h.verb) }
 	sep := theme.Faint.Render(" · ")
-	tail := render(hint{"?", T("hint.keys")})
+	tail := render(hint{m.kn("help"), T("hint.keys")})
+	if p := m.pendingKeys(); p != "" {
+		tail = theme.Hi.Render(p) + sep + tail
+	}
 	room := w - 2*margin - lipgloss.Width(tail) - lipgloss.Width(sep)
 	var parts []string
 	used := 0
@@ -565,25 +603,117 @@ func (m Model) hints(w int) string {
 	return ansi.Truncate(line, w, "…")
 }
 
-// helpView, ? ile açılan tam kısayol listesi.
-func (m Model) helpView(w int) []string {
-	keys := [][2]string{
-		{"↑ ↓  j k", "help.move"}, {"enter  →", "help.open"}, {"esc  ←", "help.back"},
-		{"tab", "help.tab"}, {"shift+tab", "help.backtab"}, {"1 – 8", "help.pages"}, {"", ""},
-		{T("key.space"), "help.pause"}, {"n  p", "help.skip"}, {",  .", "help.seek"},
-		{"+  −", "help.vol"}, {"s", "help.shuf"}, {"r", "help.rep"}, {"", ""},
-		{"a", "help.actions"}, {"t", "help.switch"}, {"o", "help.solo"}, {"l", "help.lyrics"}, {"L", "help.lyrlogin"}, {"z", "help.sleep"}, {"N", "help.newlist"}, {"f", "help.folder"}, {"", ""},
-		{"/", "help.search"}, {"?", "help.keys"}, {"q", "help.quit"},
-	}
-	rows := []string{theme.Title.Render(T("help.title")), ""}
-	for _, k := range keys {
-		if k[0] == "" {
-			rows = append(rows, "")
-			continue
+// helpView, ? ile açılan tam kısayol listesi: tuş haritasından (keymap.toml'da
+// değiştirilen tuşlar da) bölüm bölüm. Geniş pencerede iki sütun; sığmazsa
+// ↑↓ ile kayar.
+func (m Model) helpView(w, h int) []string {
+	type block []string
+	var blocks []block
+	const kw = 14
+	for _, g := range keys.Groups {
+		b := block{theme.Dim.Italic(true).Render(T(g.Title))}
+		for _, a := range keys.Catalog {
+			if a.Group != g.ID {
+				continue
+			}
+			b = append(b, theme.Plain.Render(fmt.Sprintf("%-*s", kw, truncate(m.helpKeys(a.Name), kw-1)))+theme.Dim.Render(T(a.Help)))
 		}
-		rows = append(rows, theme.Plain.Render(fmt.Sprintf("%-12s", k[0]))+theme.Dim.Render(T(k[1])))
+		if g.ID == "move" {
+			b = append(b, theme.Plain.Render(fmt.Sprintf("%-*s", kw, "1 – 8"))+theme.Dim.Render(T("help.pages")))
+			if m.km.Counts {
+				b = append(b, theme.Plain.Render(fmt.Sprintf("%-*s", kw, "5j  3K"))+theme.Dim.Render(T("help.counts")))
+			}
+		}
+		blocks = append(blocks, append(b, ""))
 	}
-	return rows
+	head := []string{theme.Title.Render(T("help.title")) + theme.Faint.Render("  ·  "+T("help.keymap")), ""}
+	lines := m.helpLines(w, blocksToLines(blocks), w >= 100)
+	room := max(h-len(head), 1)
+	sc := max(0, min(m.helpScroll, len(lines)-room))
+	if len(lines) > room {
+		return append(head, lines[sc:min(len(lines), sc+room)]...)
+	}
+	return append(head, lines...)
+}
+
+func blocksToLines[T ~[]string](bs []T) [][]string {
+	out := make([][]string, len(bs))
+	for i, b := range bs {
+		out[i] = b
+	}
+	return out
+}
+
+// helpLines, ? listesinin satırları (geniş pencerede iki sütun).
+func (m Model) helpLines(w int, blocks [][]string, two bool) []string {
+	var lines []string
+	if two { // iki sütun: bölümleri yarıya böl
+		total := 0
+		for _, b := range blocks {
+			total += len(b)
+		}
+		var left, right []string
+		for _, b := range blocks {
+			if len(left) < total/2 {
+				left = append(left, b...)
+			} else {
+				right = append(right, b...)
+			}
+		}
+		colW := w/2 - 2
+		for i := 0; i < max(len(left), len(right)); i++ {
+			l, r := "", ""
+			if i < len(left) {
+				l = ansi.Truncate(left[i], colW, "…")
+			}
+			if i < len(right) {
+				r = ansi.Truncate(right[i], colW, "…")
+			}
+			lines = append(lines, l+strings.Repeat(" ", max(colW-lipgloss.Width(l), 0)+2)+r)
+		}
+	} else {
+		for _, b := range blocks {
+			lines = append(lines, b...)
+		}
+	}
+	return lines
+}
+
+// helpKey, ? listesi açıkken kaydırma tuşları. ok=false: tuş genel kısayola düşer.
+func (m Model) helpKey(k string) (Model, bool) {
+	step := 0
+	switch k {
+	case "j", "down":
+		step = 1
+	case "k", "up":
+		step = -1
+	case "pgdown":
+		step = 10
+	case "pgup":
+		step = -10
+	case "home":
+		m.helpScroll = 0
+		return m, true
+	case "G", "end":
+		step = 1 << 20
+	default:
+		return m, false
+	}
+	// En çok: satır sayısı - görünen yükseklik (helpView ile aynı hesap).
+	w, h := m.contentSize()
+	rows := m.helpView(w, 1<<20)
+	m.helpScroll = max(0, min(m.helpScroll+step, len(rows)-2-(h-2)))
+	return m, true
+}
+
+// contentSize, sağdaki içerik alanının genişliği ve yüksekliği (body ile aynı hesap).
+func (m Model) contentSize() (int, int) {
+	h := max(m.height-7, 1)
+	w := m.width - margin - menuWidth - gutter - 1
+	if w < 24 {
+		w = m.width - margin - 1
+	}
+	return w, h
 }
 
 // ---- yardımcılar ----

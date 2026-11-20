@@ -625,7 +625,7 @@ func (m Model) profilePanel(title string, items []searchItem, cursor, scroll, w,
 			it := items[i]
 			mark := "  "
 			if it.uri != "" && it.uri == playing {
-				mark = theme.GoldText.Render("♪ ")
+				mark = theme.Playing.Render(theme.Icon.Note + " ")
 			}
 			lines = append(lines, mark+row(it.name, it.sub, w-2, active && i == cursor))
 		}

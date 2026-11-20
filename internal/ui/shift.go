@@ -76,12 +76,18 @@ func (m Model) shiftHints() []hint {
 	if m.focus == focusContent && tl == nil && (m.page == pageQueue || m.page == pageHome) {
 		hs = append(hs, hint{"R", T("shift.refresh")})
 	}
-	hs = append(hs, hint{"N", T("hint.newlist")}, hint{"L", T("shift.lyrics")})
+	if m.shownFinder() != nil {
+		hs = append(hs, hint{"O", T("shift.sort")})
+	}
+	hs = append(hs, hint{"S", T("shift.shuffle")}, hint{"N", T("hint.newlist")}, hint{"L", T("shift.lyrics")})
 	return hs
 }
 
 // shownList, bulunulan sayfada açık olan liste (yoksa nil).
 func (m Model) shownList() *trackList {
+	if m.extraOn() {
+		return m.extra.open
+	}
 	switch m.page {
 	case pageLibrary:
 		return m.lib.open

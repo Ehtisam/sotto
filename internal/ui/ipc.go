@@ -64,6 +64,7 @@ func replyAfter(cmd tea.Cmd, reply chan<- ipc.Response, text string) tea.Cmd {
 
 func (m Model) updateIPC(msg IPCMsg) (tea.Model, tea.Cmd) {
 	reply, args := msg.Reply, msg.Req.Args
+	m.rt.logs.add(logEvent, "sotto "+strings.TrimSpace(msg.Req.Cmd+" "+strings.Join(args, " ")), m.now)
 	arg := ""
 	if len(args) > 0 {
 		arg = args[0]
@@ -135,6 +136,14 @@ func (m Model) updateIPC(msg IPCMsg) (tea.Model, tea.Cmd) {
 			return fail(err)
 		}
 		return m, replyAfter(m.setVolume(v), reply, "")
+	case "mute":
+		if arg != "" && arg != "on" && arg != "off" {
+			return fail(errors.New("expected on or off, got " + strconv.Quote(arg)))
+		}
+		v, _, muted := cli.MuteTarget(m.state.Volume, cli.MutedVolume(m.cfg.LocalDir), arg)
+		mm, cmd := m.toggleMute(arg)
+		mm.flash = ""
+		return mm, replyAfter(cmd, reply, cli.MuteText(muted, v))
 	case "shuffle":
 		on, err := cli.ParseOnOff(arg, m.state.Options.Shuffle)
 		if err != nil {

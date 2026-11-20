@@ -16,8 +16,10 @@ import (
 	"github.com/Ehtisam/sotto/internal/config"
 	"github.com/Ehtisam/sotto/internal/desktop"
 	"github.com/Ehtisam/sotto/internal/ipc"
+	"github.com/Ehtisam/sotto/internal/keys"
 	"github.com/Ehtisam/sotto/internal/soloist"
 	"github.com/Ehtisam/sotto/internal/spotify"
+	"github.com/Ehtisam/sotto/internal/ui/theme"
 )
 
 // Check, "sotto doctor"un bir satırı.
@@ -212,6 +214,25 @@ func RunChecks(cfg config.Config) []Check {
 	}
 	if c := strings.TrimSpace(cfg.Hooks.OnTrackChange + cfg.Hooks.OnStatusChange); c != "" {
 		add("hooks", "info", "set; output goes to "+filepath.Join(cfg.LocalDir, "logs", "hooks.log"), "")
+	}
+	if _, err := os.Stat(keys.File(cfg.ConfigDir)); err == nil {
+		if km := keys.Load(cfg.ConfigDir); len(km.Errors) > 0 {
+			add("keys", "warn", strings.Join(km.Errors, "; "), "fix keymap.toml (Settings → Keys opens it)")
+		} else {
+			add("keys", "ok", keys.File(cfg.ConfigDir), "")
+		}
+	}
+	if errs := theme.LoadUser(cfg.ConfigDir); len(errs) > 0 {
+		var msgs []string
+		for _, e := range errs {
+			msgs = append(msgs, e.Error())
+		}
+		add("themes", "warn", strings.Join(msgs, "; "), "fix or remove the file in "+theme.UserDir(cfg.ConfigDir))
+	} else if n := len(theme.All()) - len(theme.Presets); n > 0 {
+		add("themes", "ok", fmt.Sprintf("%d of your own", n), "")
+	}
+	if !theme.ValidLook(cfg.Look.Theme) {
+		add("theme", "warn", fmt.Sprintf("unknown theme %q; using cardo", cfg.Look.Theme), "pick one in Settings or run sotto theme list")
 	}
 	return cs
 }

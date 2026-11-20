@@ -43,6 +43,9 @@ type Track struct {
 	// Yalnızca podcast bölümlerinde.
 	ReleaseDate string  `json:"release_date"`
 	Images      []Image `json:"images"`
+
+	// AddedAt: listeye ya da beğenilenlere eklenme zamanı (sotto doldurur).
+	AddedAt string `json:"added_at,omitempty"`
 }
 
 func (t Track) ArtistNames() string {
@@ -255,6 +258,16 @@ func (c *Client) PlayFrom(ctx context.Context, deviceID, contextURI, trackURI st
 		}
 	} else {
 		body["uris"] = []string{trackURI}
+	}
+	return c.do(ctx, http.MethodPut, "me/player/play"+deviceQuery(deviceID), body, nil)
+}
+
+// PlayContextAt, bir bağlamı verilen sıradaki şarkıdan başlatır (karıştırarak
+// çalarken rastgele bir yerden başlamak için).
+func (c *Client) PlayContextAt(ctx context.Context, deviceID, contextURI string, position int) error {
+	body := map[string]any{"context_uri": contextURI}
+	if position > 0 {
+		body["offset"] = map[string]int{"position": position}
 	}
 	return c.do(ctx, http.MethodPut, "me/player/play"+deviceQuery(deviceID), body, nil)
 }

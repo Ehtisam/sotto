@@ -408,7 +408,7 @@ func (m Model) folderPickView(w int) []string {
 	end := min(len(a.folders), a.plScroll+m.listHeight())
 	for i := a.plScroll; i < end; i++ {
 		c := a.folders[i]
-		name := strings.Repeat("  ", max(c.depth-1, 0)) + "▸ " + c.name
+		name := strings.Repeat("  ", max(c.depth-1, 0)) + theme.Icon.Folder + " " + c.name
 		if c.id == "" {
 			name = c.name
 		}

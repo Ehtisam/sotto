@@ -112,6 +112,9 @@ func (m Model) observe(old playSnap) tea.Cmd {
 			// Soloist bazen adı sonradan veriyor; kısa bir süre bekle.
 			if name != "" || m.now.Sub(ev.seenAt) > 3*time.Second {
 				ev.announced = cur.uri
+				if name != "" {
+					m.rt.logs.add(logEvent, "♪ "+name+" — "+artist, m.now)
+				}
 				cmds = append(cmds, m.mediaTrack(), m.mediaPosition())
 				if ev.started {
 					cmds = append(cmds, m.notifyTrack(), m.hook("track_change", m.cfg.Hooks.OnTrackChange))

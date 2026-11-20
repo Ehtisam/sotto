@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Ehtisam/sotto/internal/i18n"
+	"github.com/Ehtisam/sotto/internal/keys"
 	"github.com/Ehtisam/sotto/internal/setup"
 	"github.com/Ehtisam/sotto/internal/soloist"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
@@ -27,6 +28,15 @@ const (
 	setAccent
 	setCovers
 	setLanguage
+	setLineNumbers
+	setBorder
+	setIcons
+	setProgress
+	setStrip
+	setMouse
+	setVisualizer
+	setKeymap
+	setThemes
 	setAutostart
 	setResume
 	setVolume
@@ -43,6 +53,8 @@ const (
 // settingNames, çeviri anahtarlarında kullanılan adlar (set.name.X, set.help.X).
 var settingNames = map[settingID]string{
 	setTheme: "theme", setAccent: "accent", setCovers: "covers", setLanguage: "language",
+	setLineNumbers: "linenumbers", setBorder: "border", setIcons: "icons", setProgress: "progress", setStrip: "strip",
+	setMouse: "mouse", setVisualizer: "visualizer", setKeymap: "keymap", setThemes: "themes",
 	setAutostart: "autostart", setResume: "resume", setVolume: "volume", setSoloist: "soloist", setSoloistAuto: "soloistauto",
 	setNotify: "notify", setMedia: "media", setStartMenu: "startmenu", setExtras: "extras",
 	setAccount: "account", setConfigFile: "config",
@@ -66,6 +78,8 @@ type settingRow struct {
 var settingRows = []settingRow{
 	{id: -1, section: "set.look"},
 	{id: setTheme}, {id: setAccent}, {id: setCovers}, {id: setLanguage},
+	{id: setLineNumbers}, {id: setBorder}, {id: setIcons}, {id: setProgress}, {id: setStrip}, {id: setMouse}, {id: setVisualizer},
+	{id: setKeymap}, {id: setThemes},
 	{id: -1, section: "set.speaker"},
 	{id: setAutostart}, {id: setResume}, {id: setVolume}, {id: setSoloist}, {id: setSoloistAuto},
 	{id: -1, section: "set.desktop"},
@@ -95,7 +109,7 @@ func (m Model) settingSelected() settingID {
 // ---- değerler ----
 
 func themeIndex(name string) int {
-	for i, p := range theme.Presets {
+	for i, p := range theme.All() {
 		if p.Name == name {
 			return i
 		}
@@ -125,7 +139,11 @@ func (m Model) settingValue(id settingID) string {
 	}
 	switch id {
 	case setTheme:
-		return T("theme." + theme.Presets[themeIndex(c.Look.Theme)].Name)
+		p := theme.All()[themeIndex(c.Look.Theme)]
+		if p.User {
+			return p.Name
+		}
+		return T("theme." + p.Name)
 	case setAccent:
 		if theme.AccentHex(c.Look.Accent) == "" {
 			return T("accent.theme")
@@ -173,7 +191,26 @@ func (m Model) settingValue(id settingID) string {
 		return onOff(c.Desktop.StartMenu)
 	case setExtras:
 		return onOff(c.Extras.Enabled)
-	case setAccount, setConfigFile:
+	case setLineNumbers:
+		return T("set.ln." + orDefault(c.Look.LineNumbers, "absolute"))
+	case setBorder:
+		return T("set.border." + orDefault(c.Look.Border, "line"))
+	case setIcons:
+		ic := orDefault(c.Look.Icons, "unicode")
+		return T("set.icons."+ic) + "  " + theme.Icon.Pause + " " + theme.Icon.Note + " " + theme.Icon.Shuffle + " " + theme.Icon.Heart
+	case setProgress:
+		return T("set.progress."+orDefault(c.Look.Progress, "line")) + "  " + theme.Bar(5, 9)
+	case setStrip:
+		return T("set.strip." + orDefault(c.Look.Strip, "bottom"))
+	case setMouse:
+		return onOff(c.Look.Mouse)
+	case setVisualizer:
+		v := T("set.viz." + orDefault(c.Look.Visualizer, "off"))
+		if m.rt.viz.err != nil {
+			v += " · " + m.rt.viz.err.Error()
+		}
+		return v
+	case setAccount, setConfigFile, setKeymap, setThemes:
 		return T("set.open")
 	}
 	return ""
@@ -197,8 +234,9 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 	c := &m.cfg
 	switch id {
 	case setTheme:
-		c.Look.Theme = theme.Presets[cycle(themeIndex(c.Look.Theme), d, len(theme.Presets))].Name
-		theme.Apply(c.Look.Theme, c.Look.Accent)
+		all := theme.All()
+		c.Look.Theme = all[cycle(themeIndex(c.Look.Theme), d, len(all))].Name
+		applyLook(*c)
 	case setAccent:
 		names := accentNames()
 		i := 0
@@ -208,7 +246,7 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 			}
 		}
 		c.Look.Accent = names[cycle(i, d, len(names))]
-		theme.Apply(c.Look.Theme, c.Look.Accent)
+		applyLook(*c)
 	case setCovers:
 		modes := []string{"image", "pixel", "off"}
 		i := 0
@@ -230,6 +268,37 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 				m.lib.entries[i].name = T("lib.liked")
 			}
 		}
+	case setLineNumbers:
+		c.Look.LineNumbers = cycleOf([]string{"absolute", "relative", "off"}, orDefault(c.Look.LineNumbers, "absolute"), d)
+	case setBorder:
+		c.Look.Border = cycleOf(theme.BorderKinds, orDefault(c.Look.Border, "line"), d)
+		applyLook(*c)
+	case setIcons:
+		c.Look.Icons = cycleOf(theme.IconSets, orDefault(c.Look.Icons, "unicode"), d)
+		applyLook(*c)
+	case setProgress:
+		c.Look.Progress = cycleOf(theme.ProgressKinds, orDefault(c.Look.Progress, "line"), d)
+		applyLook(*c)
+	case setStrip:
+		c.Look.Strip = cycleOf([]string{"bottom", "top"}, orDefault(c.Look.Strip, "bottom"), d)
+		m.rt.gfx.drawn = nil // kapaklar yer değiştirdi
+	case setMouse:
+		c.Look.Mouse = !c.Look.Mouse
+	case setVisualizer:
+		c.Look.Visualizer = cycleOf([]string{"now", "strip", "off"}, orDefault(c.Look.Visualizer, "off"), d)
+		m.rt.viz.tried, m.rt.viz.err = time.Time{}, nil // hemen yeniden denensin
+	case setKeymap:
+		if err := openBrowser(keys.File(c.ConfigDir)); err != nil {
+			return m.say(err.Error()), nil
+		}
+		return m.note(T("set.keymap.opened")), nil
+	case setThemes:
+		dir := theme.UserDir(c.ConfigDir)
+		_ = os.MkdirAll(dir, 0o700)
+		if err := openBrowser(dir); err != nil {
+			return m.say(err.Error()), nil
+		}
+		return m.note(T("set.themes.opened")), nil
 	case setAutostart:
 		c.Soloist.Autostart = !c.Soloist.Autostart
 	case setVolume:
@@ -558,3 +627,21 @@ var (
 	downloadSoloist = setup.Fetch
 	readBuild       = soloist.ReadBuild
 )
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+// cycleOf, listede cur'dan d adım ötesi.
+func cycleOf(list []string, cur string, d int) string {
+	i := 0
+	for j, v := range list {
+		if v == cur {
+			i = j
+		}
+	}
+	return list[cycle(i, d, len(list))]
+}

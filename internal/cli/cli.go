@@ -24,14 +24,14 @@ import (
 // Remote: açık sotto'nun kendisi yürüttüğü komutlar.
 var Remote = map[string]bool{
 	"play": true, "pause": true, "toggle": true, "next": true, "prev": true,
-	"seek": true, "vol": true, "shuffle": true, "repeat": true,
+	"seek": true, "vol": true, "mute": true, "shuffle": true, "repeat": true,
 	"status": true, "like": true, "unlike": true, "connect": true,
 }
 
 // commands: bilinen bütün komutlar (sotto <komut>).
 var commands = map[string]bool{
 	"search": true, "devices": true, "queue": true, "playlist": true,
-	"doctor": true, "help": true, "version": true,
+	"doctor": true, "help": true, "version": true, "theme": true,
 }
 
 // IsCommand, ilk argüman bir komut mu (değilse arayüz açılır).
@@ -61,6 +61,7 @@ func Main(cfg config.Config, args []string, stdout, stderr io.Writer, stdin io.R
 		rest = []string{"help"}
 	}
 	cmd, cargs := rest[0], rest[1:]
+	StateDir = cfg.LocalDir
 	switch cmd {
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, help)
@@ -76,6 +77,8 @@ func Main(cfg config.Config, args []string, stdout, stderr io.Writer, stdin io.R
 		cmd, cargs = "playlist", append([]string{"list"}, cargs...)
 	case "doctor":
 		return Doctor(cfg, stdout, asJSON)
+	case "theme":
+		return Theme(cfg, cargs, stdout, stderr)
 	}
 	if !IsCommand(cmd) {
 		fmt.Fprintf(stderr, "sotto: unknown command %q (sotto help lists them)\n", cmd)
@@ -200,6 +203,7 @@ Playback (goes through the open sotto if there is one, else the active device):
   sotto next | prev
   sotto seek <pos>          90, 1:30, +10 or -10
   sotto vol [n|+n|-n]       show or set the volume
+  sotto mute [on|off]       mute or unmute (the old volume comes back)
   sotto shuffle [on|off]    toggle or set shuffle
   sotto repeat [off|context|track]
   sotto status              what is playing
@@ -216,6 +220,11 @@ Library:
   sotto playlist duplicate <name|link> [new name]
   sotto playlist import <file|-> [--name name | --into playlist]
         one Spotify link or uri per line; other lines are searched as "artist - title"
+
+  sotto theme list          the themes you can pick
+  sotto theme import <file> [--name name] [--use]
+        make a theme from a terminal colour scheme: iTerm2 .itermcolors,
+        Alacritty .toml or .yml, or a Windows Terminal scheme .json
 
   sotto doctor              check the setup
   --json                    machine-readable output for any command

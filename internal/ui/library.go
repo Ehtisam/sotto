@@ -28,6 +28,10 @@ type library struct {
 
 	root   *spclient.Rootlist // kitaplığın sırası ve klasörleri (✱, folders.go)
 	folder string             // "Hepsi"nde içinde bulunulan klasör ("" kök)
+
+	find   finder // sayfa içi arama: bütün listelerde (klasörlerin içi dahil)
+	sortBy string // sort.go; "" kendi sırası (klasörlerle)
+	desc   bool
 }
 
 // Kitaplık süzgeçleri; tab ile geçilir.
@@ -87,6 +91,31 @@ func (m Model) onProfile(e libEntry) bool {
 
 // libVisible, seçili süzgece uyan girişler.
 func (m Model) libVisible() []libEntry {
+	vis := m.libFiltered()
+	if m.lib.sortBy != sortCustom {
+		pos := make(map[string]int, len(m.lib.entries))
+		for i, e := range m.lib.entries {
+			pos[e.key] = i
+		}
+		vis = sortEntries(vis, m.lib.sortBy, m.lib.desc, pos)
+	}
+	if q := m.lib.find.query; q != "" {
+		order := matchOrder(nil, len(vis), func(i int) string { return vis[i].name + " " + vis[i].owner }, q)
+		out := make([]libEntry, 0, len(order))
+		for _, i := range order {
+			out = append(out, vis[i])
+		}
+		return out
+	}
+	return vis
+}
+
+// libFiltered, süzgece uyan girişler. Sayfa içi arama açıkken klasörlerin
+// içindekiler de (düz liste olarak).
+func (m Model) libFiltered() []libEntry {
+	if m.lib.filter == libAll && m.lib.find.query != "" {
+		return m.lib.entries
+	}
 	if m.lib.filter == libAll {
 		if m.foldersOn() {
 			return m.levelEntries(m.lib.folder)
@@ -194,6 +223,12 @@ func (m Model) updateLibrary(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.spotifyFailed(msg.err), nil
 				}
 				tl.clamp(m.listHeight())
+				if cmd := m.continueSeek(tl); cmd != nil {
+					return m, cmd
+				}
+				if cmd := m.continueLoadAll(tl); cmd != nil {
+					return m, cmd
+				}
 			}
 		}
 		for _, t := range msg.tracks {
@@ -294,6 +329,9 @@ func (m Model) libraryKey(k string) (Model, tea.Cmd, bool) {
 		}
 		return m.openFolderForm(nil), nil, true
 	case "K", "J": // shift+J aşağı, shift+K yukarı
+		if l.sortBy != sortCustom || l.find.query != "" {
+			return m.say(T("find.nomove")), nil, true
+		}
 		d := 1
 		if k == "K" {
 			d = -1
@@ -383,10 +421,14 @@ func (m Model) libraryView(w, h int) []string {
 			chips = append(chips, theme.Dim.Render(label))
 		}
 	}
-	rows := []string{title, sub, strings.Join(chips, theme.Faint.Render(" · ")), ""}
+	sub += theme.Faint.Render(sortLabel(l.sortBy, l.desc))
+	rows := []string{title, sub, strings.Join(chips, theme.Faint.Render(" · ")), findBar(l.find, len(m.libVisible()), len(l.entries), w)}
 
 	vis := m.libVisible()
 	if l.loaded && len(vis) == 0 {
+		if l.find.query != "" {
+			return append(rows, theme.Dim.Render(T("find.none")))
+		}
 		if l.filter == libOnProfile && m.prof.view == nil {
 			return append(rows, theme.Dim.Render(T("lib.loading")))
 		}
@@ -397,16 +439,16 @@ func (m Model) libraryView(w, h int) []string {
 		e := vis[i]
 		mark := "  "
 		if e.uri != "" && e.uri == playingCtx {
-			mark = theme.GoldText.Render("♪ ")
+			mark = theme.Playing.Render(theme.Icon.Note + " ")
 		}
 		name := e.name
 		if e.kind == kindLiked {
-			name = "♥ " + name
+			name = theme.Icon.Heart + " " + name
 		}
 		info := F("lib.songs", e.total)
 		switch {
 		case e.kind == kindFolder:
-			name = "▸ " + name
+			name = theme.Icon.Folder + " " + name
 			info = folderInfo(e.total)
 		case e.kind == kindPlaylist && m.mine(e) && m.onProfile(e):
 			info = T("lib.onprofile") + " · " + info // profilde olan zaten herkese açık

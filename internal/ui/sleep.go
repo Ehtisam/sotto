@@ -89,8 +89,8 @@ func (m Model) sleepMark() string {
 		return ""
 	}
 	if sl.track != "" {
-		return theme.Hi.Render("☾ " + T("sleep.mark.track"))
+		return theme.Hi.Render(theme.Icon.Moon + " " + T("sleep.mark.track"))
 	}
 	left := max(sl.at.Sub(m.now), 0).Round(time.Second)
-	return theme.Hi.Render(fmt.Sprintf("☾ %d:%02d", int(left.Minutes()), int(left.Seconds())%60))
+	return theme.Hi.Render(theme.Icon.Moon + fmt.Sprintf(" %d:%02d", int(left.Minutes()), int(left.Seconds())%60))
 }

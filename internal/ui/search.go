@@ -361,7 +361,7 @@ func (m Model) itemRowsH(items []searchItem, cursor, scroll, w, h int, active bo
 		}
 		mark := "  "
 		if it.uri != "" && (it.uri == playing || it.uri == playingCtx) {
-			mark = theme.GoldText.Render("♪ ")
+			mark = theme.Playing.Render(theme.Icon.Note + " ")
 		}
 		rows = append(rows, mark+row(it.name, it.sub, w-2, active && i == cursor))
 	}
@@ -380,8 +380,17 @@ func (m Model) enterSearch() Model {
 }
 
 // searchKey, Ara sayfası odaktayken tuşlar. Yazarken bütün harfler kutuya gider.
-func (m Model) searchKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
-	k := msg.String()
+// searchPaste, yapıştırılan metni arama kutusuna ekler (tek satır).
+func (m Model) searchPaste(text string) (Model, tea.Cmd) {
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return m, nil
+	}
+	m.search.query += text
+	return m.scheduleSearch()
+}
+
+func (m Model) searchKey(msg tea.KeyPressMsg, k string) (Model, tea.Cmd, bool) {
 	if m.spState != spReady {
 		return m.loginKeys(k)
 	}
