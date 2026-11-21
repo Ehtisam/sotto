@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ehtisam/sotto/internal/cli"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
 )
 
@@ -15,31 +16,25 @@ import (
 // ya da duraklatır, şarkının adı Şimdi çalıyor'a götürür. Tekerlek listeleri
 // kaydırır; şeridin üstünde sesi değiştirir.
 
-// layout, ekranın parçalarının satırları (render ile aynı hesap).
-type layout struct {
-	bodyTop, bodyH int
-	stripY         int // şeridin ilk satırı (ikincisi ilerleme çubuğu)
-	menu           bool
-	contentX       int
-}
-
-func (m Model) layout() layout {
-	bodyH := max(m.height-7, 1)
-	l := layout{bodyTop: 2, bodyH: bodyH, stripY: 2 + bodyH + 1}
-	if m.stripTop() {
-		l.stripY, l.bodyTop = 2, 5
-	}
-	cw := m.width - margin - menuWidth - gutter - 1
-	l.menu = cw >= 24
-	l.contentX = margin
-	if l.menu {
-		l.contentX = margin + menuWidth + gutter
-	}
-	return l
-}
-
 // barZone: ilerleme çubuğunun yeri (strip çizerken yazar).
 type barZone struct{ x, w int }
+
+// btnZone: şeritteki bir düğme (strip_buttons). x şeridin kendi sütunu;
+// row 0 ilk satır, 1 ilerleme satırı; action tuş haritasındaki iş adı.
+type btnZone struct {
+	x, w, row int
+	action    string
+}
+
+// stripButton, şeritte (sx, row) noktasındaki düğmenin işi.
+func (m Model) stripButton(sx, row int) string {
+	for _, b := range m.rt.btns {
+		if b.row == row && sx >= b.x && sx < b.x+b.w {
+			return b.action
+		}
+	}
+	return ""
+}
 
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !m.cfg.Look.Mouse || m.wiz.on || m.form.on {
@@ -55,7 +50,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	l := m.layout()
 	inStrip := ms.Y == l.stripY || ms.Y == l.stripY+1
 	inBody := ms.Y >= l.bodyTop && ms.Y < l.bodyTop+l.bodyH
-	inMenu := inBody && l.menu && ms.X >= margin && ms.X < margin+menuWidth
+	inMenu := inBody && l.menu && ms.X >= l.menuX && ms.X < l.menuX+menuWidth
 
 	switch msg.(type) {
 	case tea.MouseWheelMsg:
@@ -82,6 +77,13 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if ms.Y == l.stripY || ms.Y == l.stripY+1 {
+		if a := m.stripButton(ms.X-(l.stripX-margin), ms.Y-l.stripY); a == "shuffle" {
+			return m.cycleShuffle()
+		} else if a != "" {
+			return m, m.stripAction(a)
+		}
+	}
 	switch {
 	case ms.Y == l.stripY+1: // ilerleme çubuğu
 		z := m.rt.bar
@@ -91,7 +93,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, m.seekTo(time.Duration(frac * float64(d)))
 		}
 	case ms.Y == l.stripY:
-		if ms.X < margin+4 { // düğme
+		if !m.cfg.Look.Buttons && ms.X < l.stripX+4 { // düğme
 			return m, m.playPause()
 		}
 		m.page, m.focus, m.help, m.extra = pageNow, focusMenu, false, extraState{rng: m.extra.rng}
@@ -104,7 +106,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			d := string(rune('1' + i))
 			return m.keyCanon(tea.KeyPressMsg{Text: d, Code: rune(d[0])}, d)
 		}
-	case inBody && ms.X >= l.contentX:
+	case inBody && ms.X >= l.contentX && ms.X < l.contentX+l.contentW:
 		return m.clickRow(ms.Y - l.bodyTop)
 	}
 	return m, nil
@@ -192,4 +194,22 @@ func selectedMark() string {
 		return ""
 	}
 	return r[:i]
+}
+
+// stripAction, şerit düğmesinin işi.
+func (m Model) stripAction(a string) tea.Cmd {
+	switch a {
+	case "previous":
+		return m.previous()
+	case "play_pause":
+		return m.playPause()
+	case "next":
+		return m.next()
+	case "shuffle":
+		return m.setShuffle(!m.state.Options.Shuffle)
+	case "repeat":
+		next, _ := cli.NextRepeat("", m.state.Options.Repeat)
+		return m.setRepeat(next)
+	}
+	return nil
 }

@@ -123,7 +123,7 @@ func TestDriveOfflineLookGroup(t *testing.T) {
 	if !d.model().sortm.open || !strings.Contains(d.screen(), "Duration") {
 		t.Fatalf("sort menu\n%s", d.screen())
 	}
-	d.do("jjjjj<enter>")
+	d.do("jjjjjj<enter>") // kendi, ad, sanatçı, albüm, çıkış, eklenme, süre
 	m = d.model()
 	if m.lib.open.sortBy != sortDuration || m.lib.open.tracks[m.lib.open.at(0)].Name != "Song 00" {
 		t.Fatalf("sort %q first %q", m.lib.open.sortBy, m.lib.open.tracks[m.lib.open.at(0)].Name)

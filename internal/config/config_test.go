@@ -40,3 +40,49 @@ func TestSaveRoundTrip(t *testing.T) {
 		t.Fatal("covers should be off")
 	}
 }
+
+// Soloist ses ayarları ve açılış davranışı yazılıp geri okunur.
+func TestSaveSoloistPlayback(t *testing.T) {
+	dir := t.TempDir()
+	c := defaults()
+	c.ConfigDir = dir
+	c.Soloist.OnStart, c.Soloist.Crossfade, c.Soloist.Quality, c.Soloist.Normalize = "play", 8, "high", false
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(c.ConfigFile())
+	if strings.Contains(string(b), "resume =") {
+		t.Fatal("old resume key written")
+	}
+	got := defaults()
+	if err := toml.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	got.Soloist.normalize()
+	if got.Soloist.OnStart != "play" || got.Soloist.Crossfade != 8 || got.Soloist.Quality != "high" || got.Soloist.Normalize {
+		t.Fatalf("round trip = %+v", got.Soloist)
+	}
+}
+
+// Eski dosyalardaki "resume" on_start'a çevrilir; bozuk değerler düzelir.
+func TestSoloistNormalize(t *testing.T) {
+	for _, tc := range []struct {
+		file string
+		want string
+	}{
+		{"[soloist]\nresume = false\n", "off"},
+		{"[soloist]\nresume = true\n", "paused"},
+		{"[soloist]\n", "paused"},
+		{"[soloist]\non_start = \"play\"\n", "play"},
+		{"[soloist]\non_start = \"loud\"\ncrossfade = 40\nquality = \"x\"\n", "paused"},
+	} {
+		c := defaults()
+		if err := toml.Unmarshal([]byte(tc.file), &c); err != nil {
+			t.Fatal(err)
+		}
+		c.Soloist.normalize()
+		if c.Soloist.OnStart != tc.want || c.Soloist.Resume != nil || c.Soloist.Crossfade > 12 || c.Soloist.Quality != "very_high" {
+			t.Errorf("%q → %+v", tc.file, c.Soloist)
+		}
+	}
+}

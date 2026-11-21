@@ -38,6 +38,7 @@ type Options struct {
 	CacheDir      string
 	LogPath       string
 	InitialVolume int
+	Prefs         *Prefs // nil: Soloist'in ayar dosyasına dokunma
 }
 
 // Process, sotto'nun başlattığı ya da zaten çalışıp bağlandığı bir Soloist.
@@ -94,6 +95,9 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, err
 		}
+	}
+	if o.Prefs != nil {
+		_ = WritePrefs(o.DataDir, *o.Prefs) // olmazsa Soloist kendi ayarlarıyla açılır
 	}
 	// Önceki bir çalışmadan kalan adres dosyaları yanlış porta götürmesin.
 	_ = os.Remove(filepath.Join(o.DataDir, "ws.port"))

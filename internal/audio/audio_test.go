@@ -71,3 +71,43 @@ func TestLiveCapture(t *testing.T) {
 	}
 	t.Logf("silent=%v bands=%.2f", v.Silent(), v.Bands(12))
 }
+
+func TestWaveAndLevel(t *testing.T) {
+	var s []float64
+	for i := 0; i < fftSize; i++ {
+		s = append(s, 0.5*math.Sin(2*math.Pi*440*float64(i)/48000))
+	}
+	v := Fake(s, 48000)
+	w := v.Wave(64)
+	if len(w) != 64 {
+		t.Fatalf("wave len %d", len(w))
+	}
+	lo, hi := 0.0, 0.0
+	for _, x := range w {
+		lo, hi = math.Min(lo, x), math.Max(hi, x)
+	}
+	if hi < 0.3 || lo > -0.3 {
+		t.Fatalf("wave range %.2f..%.2f", lo, hi)
+	}
+	if l := v.Level(); l < 0.6 || l > 0.95 {
+		t.Fatalf("level %.2f for a -9 dB sine", l)
+	}
+	if Fake(make([]float64, fftSize), 48000).Level() > 0.01 {
+		t.Fatal("silence should be 0")
+	}
+}
+
+func TestMeter(t *testing.T) {
+	var s []float64
+	for i := 0; i < fftSize; i++ {
+		s = append(s, 0.5*math.Sin(2*math.Pi*440*float64(i)/48000))
+	}
+	rms, peak := Fake(s, 48000).Meter()
+	// 0.5 tepe = -6 dB; sinüsün RMS'i tepeden 3 dB aşağıda: -9 dB.
+	if math.Abs(peak+6.02) > 0.2 || math.Abs(rms+9.03) > 0.3 {
+		t.Fatalf("rms %.2f peak %.2f", rms, peak)
+	}
+	if r, p := Fake(make([]float64, fftSize), 48000).Meter(); r > -90 || p > -90 {
+		t.Fatalf("silence: %.1f %.1f", r, p)
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/Ehtisam/sotto/internal/config"
 	"github.com/Ehtisam/sotto/internal/cover"
 	"github.com/Ehtisam/sotto/internal/desktop"
+	"github.com/Ehtisam/sotto/internal/discord"
 	"github.com/Ehtisam/sotto/internal/i18n"
 	"github.com/Ehtisam/sotto/internal/keys"
 	"github.com/Ehtisam/sotto/internal/lyrics"
@@ -108,9 +109,15 @@ type shared struct {
 
 	sorts map[string]sortPref // liste başına sıralama (sort.go)
 
-	logs *logBook // günlük (log.go)
-	bar  barZone  // ilerleme çubuğunun ekrandaki yeri (mouse.go)
-	viz  vizState // ses görselleştirmesi (viz.go)
+	logs    *logBook          // günlük (log.go)
+	bar     barZone           // ilerleme çubuğunun ekrandaki yeri (mouse.go)
+	btns    []btnZone         // şerit düğmelerinin yeri (strip_buttons; mouse.go)
+	viz     vizState          // ses görselleştirmesi (viz.go)
+	hist    histRec           // dinleme kaydı (histrec.go)
+	smart   smartState        // akıllı karıştırma (smart.go)
+	discord *discord.Presence // Discord'da "şu an dinliyor" (discord.go)
+	// privUntil: özel oturumun bittiği an (private.go; sıfır: kapalı).
+	privUntil time.Time
 }
 
 // apiCtx, sayfa yüklemeleri için zaman aşımlı bağlam; R'den hemen sonraysa
@@ -162,6 +169,8 @@ type Model struct {
 	set        settingsState
 	help       bool // ? ile açılan kısayol listesi
 	helpScroll int
+	helpFind   finder // ? listesinde / ile süzgeç (help.go)
+	vizFull    bool   // tam ekran görselleştirme (V, vizfull.go)
 	wiz        wizardState
 	actions    actionMenu
 	lyr        lyricsState
@@ -169,6 +178,7 @@ type Model struct {
 	shiftAt    time.Time  // shift basılı (shift.go); sıfır: değil
 	form       plForm     // liste formu (plform.go)
 	sortm      sortMenu   // sıralama menüsü (sort.go)
+	pick       devPicker  // hızlı cihaz seçici (devpick.go)
 	extra      extraState // ek sayfalar: en çok dinlenenler, son çalınanlar, günlük (extra.go)
 
 	km      keys.Map // tuş haritası (keymap.go)
@@ -194,6 +204,8 @@ func New(cfg config.Config) Model {
 			bridge: bridge.New(filepath.Join(cfg.LocalDir, "bridge")),
 			lyrics: map[string]*lyrics.Lyrics{}, lyricsAsked: map[string]bool{},
 			contextNames: map[string]string{},
+			privUntil:    loadPrivate(cfg.LocalDir),
+			smart:        smartState{added: map[string]bool{}},
 		},
 		sp:  spotify.NewClient(cfg.Spotify.ClientID, cfg.TokenFile()),
 		now: time.Now(),
@@ -246,6 +258,11 @@ func (m Model) WithOutput(o *Output) Model {
 
 // Shutdown, sotto'nun başlattığı Soloist'i ve bağlantıyı kapatır.
 func (m Model) Shutdown() {
+	m.histFlush()
+	if p := m.rt.discord; p != nil {
+		m.rt.discord = nil
+		p.Close()
+	}
 	saveLast(m.cfg.LocalDir, m.rt.ev.last)
 	if m.rt.ev.media != nil {
 		m.rt.ev.media.Close()
@@ -319,6 +336,11 @@ func startSoloist(cfg config.Config) tea.Cmd {
 			CacheDir:      cfg.SoloistCacheDir(),
 			LogPath:       cfg.SoloistLog(),
 			InitialVolume: cfg.Soloist.InitialVolume,
+			Prefs: &soloist.Prefs{
+				CrossfadeS: cfg.Soloist.Crossfade,
+				Quality:    cfg.Soloist.Quality,
+				Normalize:  cfg.Soloist.Normalize,
+			},
 		})
 		if err != nil {
 			return engineErrMsg{err}
@@ -428,6 +450,7 @@ var openBrowser = func(u string) error {
 
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{tick(), tea.Raw(gfxQuery)}
+	m.syncDiscord() // ayar açıksa Discord'a bağlanmayı dener (arka planda)
 	if m.cfg.Soloist.Autostart {
 		cmds = append(cmds, startSoloist(m.cfg))
 	}
@@ -481,6 +504,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.devs.switching = ""
 		}
 		var cmd, dcmd, qcmd, scmd, vcmd tea.Cmd
+		m.histTick()
+		smcmd := m.smartTick()
 		m, vcmd = m.vizTick()
 		m = m.lyricsTick()
 		if m.extraOn() && m.extra.page == extraLog {
@@ -494,7 +519,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.devs.loading = true
 			}
 		}
-		return m, tea.Batch(tick(), cmd, dcmd, qcmd, scmd, vcmd, m.fetchCovers(), m.fetchLyrics())
+		return m, tea.Batch(tick(), cmd, dcmd, qcmd, scmd, vcmd, smcmd, m.fetchCovers(), m.fetchLyrics())
 
 	case engineUpMsg:
 		m.rt.proc, m.rt.client = msg.proc, msg.client
@@ -580,6 +605,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case savedStateMsg, actionDoneMsg:
 		return m.updateActions(msg)
 
+	case smartRecsMsg, smartAddedMsg:
+		return m.updateSmart(msg)
+	case privateMsg:
+		return m.updatePrivate(msg)
 	case radioMsg:
 		return m.updateRadio(msg)
 
@@ -650,7 +679,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ipcFoundMsg:
 		return m, m.playFound(msg.uri, msg.label, msg.reply)
 
-	case soloistBuildMsg, soloistUpdatedMsg:
+	case soloistBuildMsg, soloistUpdatedMsg, applyPrefsMsg:
 		return m.updateSettingsMsg(msg)
 
 	case mediaOpenedMsg, mediaEventMsg:
@@ -733,8 +762,8 @@ func (m *Model) apply(ev any) tea.Cmd {
 			// Soloist kullanıcı istediği için açıldıysa müziği ona al;
 			// açılıştaysa ve hiçbir yerde bir şey çalmıyorsa kaldığın yeri yükle.
 			if m.devs.pending != "" && m.spState == spReady {
-				cmds = append(cmds, m.transferByName(m.devs.pending))
-				m.devs.pending = ""
+				cmds = append(cmds, m.transferByNamePlay(m.devs.pending, !m.devs.pendingPaused))
+				m.devs.pending, m.devs.pendingPaused = "", false
 			} else {
 				cmds = append(cmds, m.maybeResume())
 			}
@@ -866,16 +895,41 @@ func (m Model) keyCanon(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 		return m.actionsKey(k)
 	}
 
-	// Kısayol listesi açıkken: esc ya da ? kapatır.
+	// Kısayol listesi açıkken: esc ya da ? kapatır (esc önce süzgeci temizler).
 	if m.help {
+		if mm, cmd, ok := m.helpFindKey(msg); ok {
+			return mm, cmd
+		}
 		switch k {
-		case "?", "esc", "q":
+		case "esc":
+			if m.helpFind.active() {
+				m.helpFind, m.helpScroll = finder{}, 0
+				return m, nil
+			}
+			m.help = false
+			return m, nil
+		case "?", "q":
 			m.help = false
 			return m, nil
 		}
 		if mm, ok := m.helpKey(k); ok {
 			return mm, nil
 		}
+	}
+
+	// Tam ekran görselleştirme açıkken: stil ve kapatma tuşları; gerisi genel.
+	if m.vizFull && !m.help {
+		if mm, cmd, ok := m.vizFullKey(k); ok {
+			return mm, cmd
+		}
+	}
+
+	// Cihaz seçici açıkken tuşlar ona gider.
+	if m.pick.open {
+		if k == "ctrl+c" {
+			return m, m.quit()
+		}
+		return m.devPickKey(k)
 	}
 
 	// Sıralama menüsü açıkken tuşlar ona gider.
@@ -934,7 +988,7 @@ func (m Model) keyCanon(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, m.quit()
 	case "?":
-		m.help, m.helpScroll = true, 0
+		m.help, m.helpScroll, m.helpFind = true, 0, finder{}
 		return m, nil
 	case "i":
 		return m.openInfo()
@@ -965,6 +1019,12 @@ func (m Model) keyCanon(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case "enter", "right", "tab":
+		if m.page == pageNow && m.lyricsPickable() {
+			// Şimdi çalıyor: sözlere gir, söylenen satır seçili başlar.
+			m.focus = focusContent
+			mm, cmd, _ := m.nowKey("enter")
+			return mm, cmd
+		}
 		if m.page.hasContent() {
 			m.focus = focusContent
 			if m.page == pageSearch {
@@ -998,12 +1058,16 @@ func (m Model) keyCanon(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 		}
 		return m, m.setVolume(v)
 	case "s":
-		return m, m.setShuffle(!m.state.Options.Shuffle)
+		return m.cycleShuffle()
 	case "r":
 		next, _ := cli.NextRepeat("", m.state.Options.Repeat)
 		return m, m.setRepeat(next)
 	case "t":
 		return m.switchSpeaker()
+	case "d":
+		return m.openDevPicker()
+	case "V":
+		return m.toggleVizFull()
 	case "a":
 		return m.openActions()
 	case "o":
@@ -1061,6 +1125,8 @@ func (m Model) contentKey(k string) (Model, tea.Cmd, bool) {
 // pageKey, içerik odaktayken tuşu açık sayfaya verir.
 func (m Model) pageKey(k string) (Model, tea.Cmd, bool) {
 	switch m.page {
+	case pageNow:
+		return m.nowKey(k)
 	case pageHome:
 		return m.homeKey(k)
 	case pageLibrary:
@@ -1132,4 +1198,4 @@ func (m Model) position() time.Duration {
 }
 
 // listHeight, içerik sayfalarında liste satırlarına kalan yükseklik.
-func (m Model) listHeight() int { return max(m.height-7-4, 1) }
+func (m Model) listHeight() int { return max(m.layout().bodyH-4, 1) }

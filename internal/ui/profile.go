@@ -443,7 +443,7 @@ func (m Model) profilePhoto() (url string, cols, rows int) {
 	}
 	// Gövde: başlık + alt satır + boş (3), fotoğraf, boş (1), üst paneller
 	// (başlık + en çok 5 satır), boş, alt paneller (başlık + satırlar).
-	body := m.height - 7
+	body := m.layout().bodyH
 	rows = min(profilePhotoMax, body-3-1-(1+profileTopRowsMax)-1-(1+profileMinBottom))
 	rows = min(rows, (m.contentWidth()-3-profileMinInfo)/2) // fotoğraf iki sütun x bir satır
 	if rows < 4 {
@@ -537,12 +537,7 @@ func wrapParts(parts []string, w int) []string {
 }
 
 // contentWidth, sayfa içeriğinin genişliği (body ile aynı hesap).
-func (m Model) contentWidth() int {
-	if w := m.width - margin - menuWidth - gutter - 1; w >= 24 {
-		return w
-	}
-	return m.width - margin - 1
-}
+func (m Model) contentWidth() int { return m.layout().contentW }
 
 // profileTopRows: başlık, alt satır, boş, profil bilgisi, boş.
 func (m Model) profileTopRows() int {
@@ -555,7 +550,7 @@ func (m Model) profileTopRows() int {
 }
 
 // profileListHeight, panellere kalan yükseklik.
-func (m Model) profileListHeight() int { return max(m.height-7-m.profileTopRows(), 1) }
+func (m Model) profileListHeight() int { return max(m.layout().bodyH-m.profileTopRows(), 1) }
 
 func (m Model) profileView(w int) []string {
 	title := theme.Title.Render(T("page.profile"))

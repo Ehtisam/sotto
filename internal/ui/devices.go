@@ -16,13 +16,15 @@ import (
 // cihazları yan yana; enter müziği seçilene aktarır.
 
 type deviceList struct {
-	items    []spotify.Device
-	loading  bool
-	fetched  time.Time
-	err      error
-	cursor   int
-	pending  string // Soloist açılınca müziği ona aktar
-	switchTo string // kumandaya dönerken kullanılacak son cihaz
+	items   []spotify.Device
+	loading bool
+	fetched time.Time
+	err     error
+	cursor  int
+	pending string // Soloist açılınca müziği ona aktar
+	// pendingPaused: aktarırken çalmaya başlatma (yeniden başlatma öncesi duraklatılmıştı).
+	pendingPaused bool
+	switchTo      string // kumandaya dönerken kullanılacak son cihaz
 
 	// switching: müzik bu cihaza geçiriliyor (tuşa basıldığı an başlar,
 	// transferredMsg ya da hata gelince biter); şeritte ve başlıkta görünür.
@@ -148,7 +150,10 @@ func (m Model) transfer(id, name string) tea.Cmd {
 
 // transferByName, cihaz listesini tazeleyip adı verilen cihaza aktarır
 // (Soloist yeni açıldığında kimliği henüz bilinmiyor).
-func (m Model) transferByName(name string) tea.Cmd {
+func (m Model) transferByName(name string) tea.Cmd { return m.transferByNamePlay(name, true) }
+
+// transferByNamePlay: play false ise müzik duraklatılmış olarak gelir.
+func (m Model) transferByNamePlay(name string, play bool) tea.Cmd {
 	sp := m.sp
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -157,7 +162,7 @@ func (m Model) transferByName(name string) tea.Cmd {
 			if ds, err := sp.Devices(ctx); err == nil {
 				for _, d := range ds {
 					if d.Name == name {
-						return transferredMsg{name, sp.Transfer(ctx, d.ID, true)}
+						return transferredMsg{name, sp.Transfer(ctx, d.ID, play)}
 					}
 				}
 			}
@@ -175,7 +180,7 @@ var errNotListed error = notListedErr{}
 
 // startSoloistAndUse, Soloist'i açar ve hazır olunca müziği ona aktarır.
 func (m Model) startSoloistAndUse() (Model, tea.Cmd) {
-	m.devs.pending = m.cfg.Soloist.DeviceName
+	m.devs.pending, m.devs.pendingPaused = m.cfg.Soloist.DeviceName, false
 	m = m.beginSwitch(m.cfg.Soloist.DeviceName)
 	if m.engine == engineStarting {
 		return m, nil
@@ -204,6 +209,38 @@ func (m Model) stopSoloist() (Model, tea.Cmd) {
 			p.Stop()
 		}
 		return pollSoonMsg{}
+	}
+}
+
+// restartSoloist, Soloist'i ayar dosyası yeniden okunsun diye kapatıp açar.
+// Müzik Soloist'teyse açılınca ona geri alınır: çalıyorsa çalmaya,
+// duraklatılmışsa duraklatılmış olarak (Spotify konumu saklar).
+// Soloist kapalıysa ya da başka bir sotto açtıysa yalnızca not düşer.
+func (m Model) restartSoloist() (Model, tea.Cmd) {
+	if m.rt.proc == nil || m.rt.proc.Attached || m.engine != engineReady {
+		return m.note(T("set.applied.next")), nil
+	}
+	active, wasPlaying := m.soloistActive(), m.playing()
+	c, p, cfg := m.rt.client, m.rt.proc, m.cfg
+	m.rt.client, m.rt.proc = nil, nil
+	m.auth, m.haveAuth = soloist.AuthState{}, false
+	m.state, m.queue = soloist.PlaybackState{}, soloist.QueueChanged{}
+	m.devs.pending, m.devs.pendingPaused = "", false
+	if active {
+		m.devs.pending, m.devs.pendingPaused = cfg.Soloist.DeviceName, !wasPlaying
+		m = m.beginSwitch(cfg.Soloist.DeviceName)
+	}
+	m.engine, m.engineErr = engineStarting, nil
+	m = m.note(T("set.applying"))
+	start := startSoloist(cfg)
+	return m, func() tea.Msg {
+		if c != nil {
+			c.Close()
+		}
+		if p != nil {
+			p.Stop()
+		}
+		return start()
 	}
 }
 
@@ -248,6 +285,12 @@ func (m Model) updateDevices(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.devs.items, m.devs.err = msg.items, nil
 		m.devs.cursor = max(0, min(len(m.deviceRows())-1, m.devs.cursor))
+		if m.pick.open {
+			if !m.pick.moved {
+				m.pickActive()
+			}
+			m.pick.cursor = max(0, min(len(m.deviceRows())-1, m.pick.cursor))
+		}
 	case transferredMsg:
 		m.devs.switching = ""
 		if msg.err != nil {

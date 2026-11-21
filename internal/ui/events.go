@@ -116,6 +116,7 @@ func (m Model) observe(old playSnap) tea.Cmd {
 					m.rt.logs.add(logEvent, "♪ "+name+" — "+artist, m.now)
 				}
 				cmds = append(cmds, m.mediaTrack(), m.mediaPosition())
+				m.updateDiscord()
 				if ev.started {
 					cmds = append(cmds, m.notifyTrack(), m.hook("track_change", m.cfg.Hooks.OnTrackChange))
 				}
@@ -137,6 +138,7 @@ func (m Model) observe(old playSnap) tea.Cmd {
 		prev := ev.lastStatus
 		ev.lastStatus = cur.status
 		cmds = append(cmds, m.mediaStatus(cur.status), m.mediaPosition())
+		m.updateDiscord()
 		if prev != "" && ev.started {
 			cmds = append(cmds, m.hook("status_change", m.cfg.Hooks.OnStatusChange))
 		}
@@ -144,6 +146,7 @@ func (m Model) observe(old playSnap) tea.Cmd {
 		// Sarıldıysa kartın zaman çizelgesini düzelt.
 		if d := old.pos.At(m.now) - cur.pos.At(m.now); math.Abs(d.Seconds()) > 2 {
 			cmds = append(cmds, m.mediaPosition())
+			m.updateDiscord()
 		}
 	}
 	return tea.Batch(cmds...)
@@ -528,15 +531,16 @@ func (m Model) setVolume(v int) tea.Cmd {
 type resumedMsg struct{ err error }
 
 // maybeResume: Soloist açılışta hazır olunca, hiçbir yerde bir şey çalmıyorsa
-// müziği ona duraklatılmış olarak aktarır; Spotify son durumu (şarkı, konum,
-// bağlam) geri yükler.
+// müziği ona aktarır (on_start: "paused" duraklatılmış, "play" çalarak);
+// Spotify son durumu (şarkı, konum, bağlam) geri yükler.
 func (m Model) maybeResume() tea.Cmd {
 	ev := &m.rt.ev
-	if ev.resumeTried || !m.cfg.Soloist.Resume || m.spState != spReady || m.devs.pending != "" {
+	mode := m.cfg.Soloist.OnStart
+	if ev.resumeTried || mode == "off" || m.spState != spReady || m.devs.pending != "" {
 		return nil
 	}
 	ev.resumeTried = true
-	sp, name := m.sp, m.cfg.Soloist.DeviceName
+	sp, name, play := m.sp, m.cfg.Soloist.DeviceName, mode == "play"
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -547,7 +551,7 @@ func (m Model) maybeResume() tea.Cmd {
 			if ds, err := sp.Devices(ctx); err == nil {
 				for _, d := range ds {
 					if d.Name == name {
-						return resumedMsg{sp.Transfer(ctx, d.ID, false)}
+						return resumedMsg{sp.Transfer(ctx, d.ID, play)}
 					}
 				}
 			}

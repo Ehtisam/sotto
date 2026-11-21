@@ -27,6 +27,7 @@ type Analyzer struct {
 	rate   int
 	last   time.Time // son örneğin geldiği an
 	smooth []float64
+	fast   []float64 // BandsFast'ın yumuşatması
 }
 
 func newAnalyzer() *Analyzer { return &Analyzer{rate: 48000} }
@@ -54,7 +55,13 @@ func (a *Analyzer) Silent() bool {
 
 // Bands, n bandın 0–1 arası yüksekliği (40 Hz – 16 kHz, logaritmik aralıklı).
 // Yükselişler hemen, düşüşler yavaşça görünür.
-func (a *Analyzer) Bands(n int) []float64 {
+func (a *Analyzer) Bands(n int) []float64 { return a.bands(n, &a.smooth, 0.06) }
+
+// BandsFast, Bands gibi ama düşüşler hızlı (tepe çizgili görünümler için:
+// çubuk iner, tepe bir süre asılı kalır).
+func (a *Analyzer) BandsFast(n int) []float64 { return a.bands(n, &a.fast, 0.22) }
+
+func (a *Analyzer) bands(n int, smooth *[]float64, fall float64) []float64 {
 	if n <= 0 {
 		return nil
 	}
@@ -67,8 +74,8 @@ func (a *Analyzer) Bands(n int) []float64 {
 	}
 	rate := a.rate
 	quiet := time.Since(a.last) > 400*time.Millisecond
-	if len(a.smooth) != n {
-		a.smooth = make([]float64, n)
+	if len(*smooth) != n {
+		*smooth = make([]float64, n)
 	}
 	a.mu.Unlock()
 
@@ -93,13 +100,14 @@ func (a *Analyzer) Bands(n int) []float64 {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	sm := *smooth
 	for i := range out {
-		if out[i] >= a.smooth[i] {
-			a.smooth[i] = out[i]
+		if out[i] >= sm[i] {
+			sm[i] = out[i]
 		} else {
-			a.smooth[i] = math.Max(out[i], a.smooth[i]-0.06)
+			sm[i] = math.Max(out[i], sm[i]-fall)
 		}
-		out[i] = a.smooth[i]
+		out[i] = sm[i]
 	}
 	return out
 }
@@ -202,4 +210,58 @@ func Fake(samples []float64, rate int) *Visualizer {
 	close(v.done)
 	v.Push(samples, rate)
 	return v
+}
+
+// Wave, son örneklerden n tanesi (eşit aralıklı seçilmiş), -1–1 arası
+// (osiloskop için). Ses yoksa sıfırlar.
+func (a *Analyzer) Wave(n int) []float64 {
+	if n <= 0 {
+		return nil
+	}
+	out := make([]float64, n)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if time.Since(a.last) > 400*time.Millisecond {
+		return out
+	}
+	// Son ~20 ms'yi göster: dalganın birkaç periyodu görünsün.
+	span := min(fftSize, max(n, a.rate/50))
+	for i := 0; i < n; i++ {
+		j := (a.pos - span + i*span/n + fftSize) % fftSize
+		out[i] = math.Max(-1, math.Min(1, a.ring[j]))
+	}
+	return out
+}
+
+// Level, son ~40 ms'nin ses yüksekliği 0–1 (dB ölçekli; VU göstergesi için).
+func (a *Analyzer) Level() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if time.Since(a.last) > 400*time.Millisecond {
+		return 0
+	}
+	sum := 0.0
+	for _, s := range a.ring {
+		sum += s * s
+	}
+	rms := math.Sqrt(sum / fftSize)
+	db := 20 * math.Log10(rms+1e-9) // 0 dBFS = 1
+	return math.Max(0, math.Min(1, (db+48)/48))
+}
+
+// Meter, son ~40 ms'nin ortalama (RMS) ve tepe seviyesi, dBFS (0 dB en yüksek).
+// Ses yoksa ikisi de -96.
+func (a *Analyzer) Meter() (rmsDB, peakDB float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if time.Since(a.last) > 400*time.Millisecond {
+		return -96, -96
+	}
+	sum, peak := 0.0, 0.0
+	for _, s := range a.ring {
+		sum += s * s
+		peak = math.Max(peak, math.Abs(s))
+	}
+	db := func(x float64) float64 { return math.Max(-96, 20*math.Log10(x+1e-9)) }
+	return db(math.Sqrt(sum / fftSize)), db(peak)
 }

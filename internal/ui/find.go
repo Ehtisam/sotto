@@ -190,6 +190,9 @@ func (m *Model) shownFinder() *finder {
 	if m.page == pageLibrary && m.spState == spReady && m.lib.open == nil {
 		return &m.lib.find
 	}
+	if m.page == pageSettings && !m.extraOn() {
+		return &m.set.find
+	}
 	return nil
 }
 
@@ -287,6 +290,9 @@ func (m *Model) afterFind() {
 		m.lib.cursor, m.lib.scroll = 0, 0
 		m.clampLib()
 	}
+	if m.page == pageSettings {
+		m.set.cursor = 0
+	}
 }
 
 // clearFind: esc süzgeç açıkken önce onu temizler. ok=false: süzgeç yoktu.
@@ -298,6 +304,17 @@ func (m Model) clearFind() (Model, bool) {
 	keep := -1
 	if tl := m.shownList(); tl != nil {
 		keep = tl.cursor
+	}
+	if f == &m.set.find {
+		// Seçili ayarda kal.
+		sel := m.settingSelected()
+		*f = finder{}
+		for i, id := range settingIDs() {
+			if id == sel {
+				m.set.cursor = i
+			}
+		}
+		return m, true
 	}
 	*f = finder{}
 	if tl := m.shownList(); tl != nil && keep >= 0 {

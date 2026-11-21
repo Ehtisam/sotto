@@ -25,6 +25,7 @@ const (
 	sortAlbum    = "album"
 	sortAdded    = "added"
 	sortDuration = "duration"
+	sortReleased = "released" // albümün çıkış tarihi
 	// Kitaplık
 	sortRecent = "recent"
 	sortOwner  = "owner"
@@ -73,6 +74,12 @@ func sortTracks(tl *trackList, by string, desc bool) []int {
 			return cli.Fold(t.ArtistNames() + "\x00" + t.Album.Name)
 		case sortAlbum:
 			return cli.Fold(t.Album.Name)
+		case sortReleased:
+			// "1999", "1999-05" ya da "1999-05-01": dizgi sırası tarih sırası.
+			if t.Album.ReleaseDate != "" {
+				return t.Album.ReleaseDate + "\x00" + cli.Fold(t.Album.Name)
+			}
+			return t.ReleaseDate
 		case sortAdded:
 			if t.AddedAt != "" {
 				return t.AddedAt
@@ -174,7 +181,7 @@ func (m Model) sortChoices(tl *trackList) []string {
 	}
 	out := []string{sortCustom, sortName, sortArtist}
 	if tl.entry.kind != kindAlbum {
-		out = append(out, sortAlbum, sortAdded)
+		out = append(out, sortAlbum, sortReleased, sortAdded)
 	}
 	return append(out, sortDuration)
 }

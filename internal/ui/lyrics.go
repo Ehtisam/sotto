@@ -20,6 +20,12 @@ type lyricsState struct {
 	showQueue bool      // l: sözler yerine sıradakiler
 	login     string    // Spotify sözleri için bir kerelik giriş adresi
 	retryAt   time.Time // girişten sonra yeniden dene
+
+	// Satır seçme (Şimdi çalıyor'da enter ile girilir): ↑ ↓ satır seçer,
+	// enter o satırın başına sarar. pickOn değilken sözler şarkıyı izler.
+	pickOn  bool
+	pick    int
+	pickURI string // seçimin yapıldığı şarkı; şarkı değişince seçim düşer
 }
 
 type lyricsMsg struct {
@@ -33,6 +39,9 @@ func (m Model) fetchLyrics() tea.Cmd {
 	it := m.state.Item
 	if it == nil || it.EntityType != "track" || it.URI == "" || m.rt.lyricsAsked[it.URI] {
 		return nil
+	}
+	if _, ok := m.rt.lyrics[it.URI]; ok {
+		return nil // zaten biliniyor
 	}
 	name, artist, album := m.describe(it)
 	if name == "" || artist == "" {
@@ -126,9 +135,14 @@ func (m Model) lyricsRows(w, h int) []string {
 	}
 	body := max(h-2, 1) // son iki satır: boşluk ve kaynak
 	cur := l.At(m.position())
+	pick, picking := m.lyricsPick()
 	start := 0
 	if l.Synced {
-		start = max(0, cur-body/3)
+		anchor := cur
+		if picking {
+			anchor = pick
+		}
+		start = max(0, anchor-body/3)
 		start = min(start, max(len(l.Lines)-body, 0))
 	}
 	var rows []string
@@ -137,6 +151,11 @@ func (m Model) lyricsRows(w, h int) []string {
 		switch {
 		case !l.Synced:
 			rows = append(rows, theme.Plain.Render(text))
+		case picking && i == pick:
+			if text == "" {
+				text = "♪"
+			}
+			rows = append(rows, theme.SelectedRow.Render(text))
 		case i == cur:
 			rows = append(rows, theme.Hi.Bold(true).Render(text))
 		case i < cur:
@@ -146,6 +165,79 @@ func (m Model) lyricsRows(w, h int) []string {
 		}
 	}
 	return append(rows, "", theme.Faint.Italic(true).Render(truncate(T("lyr.source")+l.Source, w)))
+}
+
+// ---- satıra atlama ----
+
+// lyricsPickable: Şimdi çalıyor'da eş zamanlı sözler görünüyor.
+func (m Model) lyricsPickable() bool {
+	l, _ := m.currentLyrics()
+	return !m.lyr.showQueue && l != nil && l.Synced && len(l.Lines) > 0
+}
+
+// lyricsPick, seçili satır ve seçimin geçerli olup olmadığı.
+func (m Model) lyricsPick() (int, bool) {
+	l, _ := m.currentLyrics()
+	if !m.lyr.pickOn || m.focus != focusContent || m.page != pageNow || l == nil || !l.Synced ||
+		m.state.Item == nil || m.lyr.pickURI != m.state.Item.URI {
+		return 0, false
+	}
+	return max(0, min(m.lyr.pick, len(l.Lines)-1)), true
+}
+
+// nowKey: Şimdi çalıyor'da içerik odaktayken (sözlerde satır seçme).
+func (m Model) nowKey(k string) (Model, tea.Cmd, bool) {
+	if !m.lyricsPickable() {
+		if k == "esc" || k == "backspace" {
+			m.focus = focusMenu
+			return m, nil, true
+		}
+		return m, nil, false
+	}
+	l, _ := m.currentLyrics()
+	pick, picking := m.lyricsPick()
+	if !picking {
+		pick = max(0, l.At(m.position())) // seçim söylenen satırdan başlar
+	}
+	move := func(d int) (Model, tea.Cmd, bool) {
+		m.lyr.pickOn, m.lyr.pickURI = true, m.state.Item.URI
+		m.lyr.pick = max(0, min(len(l.Lines)-1, pick+d))
+		return m, nil, true
+	}
+	switch k {
+	case "up", "k":
+		if !picking {
+			return move(0)
+		}
+		return move(-1)
+	case "down", "j":
+		if !picking {
+			return move(0)
+		}
+		return move(1)
+	case "pgup":
+		return move(-5)
+	case "pgdown":
+		return move(5)
+	case "home":
+		return move(-len(l.Lines))
+	case "G", "end":
+		return move(len(l.Lines))
+	case "enter":
+		if !picking {
+			return move(0)
+		}
+		m.lyr.pickOn = false // atladıktan sonra sözler yine şarkıyı izler
+		return m, m.seekTo(l.Lines[pick].Start), true
+	case "esc", "backspace":
+		if picking {
+			m.lyr.pickOn = false
+			return m, nil, true
+		}
+		m.focus = focusMenu
+		return m, nil, true
+	}
+	return m, nil, false
 }
 
 // openLyricsLogin, Spotify sözleri için tarayıcıda girişi açar.

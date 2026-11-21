@@ -70,6 +70,7 @@ var lookTexts = map[string]struct{ en, tr string }{
 	"sort.by.artist":    {"Artist", "Sanatçıya göre"},
 	"sort.by.album":     {"Album", "Albüme göre"},
 	"sort.by.added":     {"Date added", "Eklenme tarihine göre"},
+	"sort.by.released":  {"Release date", "Çıkış tarihine göre"},
 	"sort.by.duration":  {"Duration", "Süreye göre"},
 	"sort.by.recent":    {"Recently added", "Son eklenen"},
 	"sort.by.owner":     {"Creator", "Oluşturana göre"},

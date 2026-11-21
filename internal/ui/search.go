@@ -373,6 +373,8 @@ func (m Model) itemRowsH(items []searchItem, cursor, scroll, w, h int, active bo
 		playingCtx = m.state.Context.URI
 	}
 	var rows []string
+	full := w
+	w -= scrollbarW(len(items), h)
 	end := min(len(items), scroll+h)
 	for i := scroll; i < end; i++ {
 		it := items[i]
@@ -401,7 +403,7 @@ func (m Model) itemRowsH(items []searchItem, cursor, scroll, w, h int, active bo
 		}
 		rows = append(rows, mark+row(it.name, it.sub, w-2, active && i == cursor))
 	}
-	return rows
+	return withScrollbar(rows, 0, len(items), scroll, h, full)
 }
 
 // enterSearch, sayfaya girilince yazı kutusunu odaklar.

@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ehtisam/sotto/internal/cli"
 	"github.com/Ehtisam/sotto/internal/i18n"
 	"github.com/Ehtisam/sotto/internal/keys"
 	"github.com/Ehtisam/sotto/internal/setup"
@@ -33,19 +34,27 @@ const (
 	setIcons
 	setProgress
 	setStrip
+	setMenuPos
+	setLayout
+	setButtons
 	setMouse
 	setVisualizer
 	setKeymap
 	setThemes
 	setAutostart
 	setResume
+	setCrossfade
+	setQuality
+	setNormalize
 	setVolume
 	setSoloist
 	setSoloistAuto
 	setNotify
 	setMedia
 	setStartMenu
+	setDiscord
 	setExtras
+	setPrivate
 	setAccount
 	setConfigFile
 )
@@ -53,11 +62,11 @@ const (
 // settingNames, çeviri anahtarlarında kullanılan adlar (set.name.X, set.help.X).
 var settingNames = map[settingID]string{
 	setTheme: "theme", setAccent: "accent", setCovers: "covers", setLanguage: "language",
-	setLineNumbers: "linenumbers", setBorder: "border", setIcons: "icons", setProgress: "progress", setStrip: "strip",
+	setLineNumbers: "linenumbers", setBorder: "border", setIcons: "icons", setProgress: "progress", setStrip: "strip", setMenuPos: "menupos", setLayout: "layout", setButtons: "buttons",
 	setMouse: "mouse", setVisualizer: "visualizer", setKeymap: "keymap", setThemes: "themes",
-	setAutostart: "autostart", setResume: "resume", setVolume: "volume", setSoloist: "soloist", setSoloistAuto: "soloistauto",
-	setNotify: "notify", setMedia: "media", setStartMenu: "startmenu", setExtras: "extras",
-	setAccount: "account", setConfigFile: "config",
+	setAutostart: "autostart", setResume: "resume", setCrossfade: "crossfade", setQuality: "quality", setNormalize: "normalize", setVolume: "volume", setSoloist: "soloist", setSoloistAuto: "soloistauto",
+	setNotify: "notify", setMedia: "media", setStartMenu: "startmenu", setDiscord: "discord", setExtras: "extras",
+	setPrivate: "private", setAccount: "account", setConfigFile: "config",
 }
 
 type settingsState struct {
@@ -67,7 +76,15 @@ type settingsState struct {
 	buildErr error           // okunamadı / kurulu değil
 	updating *setup.Progress // Soloist indiriliyor
 	warned   bool            // süre uyarısı bu açılışta bir kez
+	applySeq int             // Soloist ses ayarlarının son değişikliği
+	find     finder          // / ile ayarlar içinde arama
 }
+
+// applyPrefsMsg: ses ayarı değişti, bekleme bitti; seq hâlâ sonuncuysa Soloist yeniden açılır.
+type applyPrefsMsg struct{ seq int }
+
+// prefsDelay: ses ayarı son değişiklikten bu kadar sonra uygulanır.
+var prefsDelay = 1500 * time.Millisecond
 
 // settingRow, sayfanın bir satırı: bölüm başlığı (id < 0) ya da ayar.
 type settingRow struct {
@@ -78,16 +95,17 @@ type settingRow struct {
 var settingRows = []settingRow{
 	{id: -1, section: "set.look"},
 	{id: setTheme}, {id: setAccent}, {id: setCovers}, {id: setLanguage},
-	{id: setLineNumbers}, {id: setBorder}, {id: setIcons}, {id: setProgress}, {id: setStrip}, {id: setMouse}, {id: setVisualizer},
+	{id: setLineNumbers}, {id: setBorder}, {id: setIcons}, {id: setProgress}, {id: setStrip}, {id: setMenuPos}, {id: setLayout}, {id: setMouse}, {id: setButtons}, {id: setVisualizer},
 	{id: setKeymap}, {id: setThemes},
 	{id: -1, section: "set.speaker"},
-	{id: setAutostart}, {id: setResume}, {id: setVolume}, {id: setSoloist}, {id: setSoloistAuto},
+	{id: setAutostart}, {id: setResume}, {id: setCrossfade}, {id: setQuality}, {id: setNormalize},
+	{id: setVolume}, {id: setSoloist}, {id: setSoloistAuto},
 	{id: -1, section: "set.desktop"},
-	{id: setNotify}, {id: setMedia}, {id: setStartMenu},
+	{id: setNotify}, {id: setMedia}, {id: setStartMenu}, {id: setDiscord},
 	{id: -1, section: "set.extras"},
 	{id: setExtras},
 	{id: -1, section: "set.account"},
-	{id: setAccount}, {id: setConfigFile},
+	{id: setPrivate}, {id: setAccount}, {id: setConfigFile},
 }
 
 // settingIDs, seçilebilir satırlar sırasıyla.
@@ -101,8 +119,53 @@ func settingIDs() []settingID {
 	return out
 }
 
+// shownSettingIDs: süzgeç açıksa yalnız uyan ayarlar (sayfadaki sırayla).
+func (m Model) shownSettingIDs() []settingID {
+	all := settingIDs()
+	q := m.set.find.query
+	if q == "" {
+		return all
+	}
+	section := map[settingID]string{}
+	cur := ""
+	for _, r := range settingRows {
+		if r.id < 0 {
+			cur = T(r.section)
+		} else {
+			section[r.id] = cur
+		}
+	}
+	text := func(i int) string {
+		id := all[i]
+		name := settingNames[id]
+		return T("set.name."+name) + " " + section[id] + " " + m.settingValue(id) + " " + T("set.help."+name)
+	}
+	// Bulanık eşleşme uzun açıklamalarda her şeyi yakalıyor: burada sorgunun
+	// her sözcüğü metinde geçmeli.
+	words := strings.Fields(cli.Fold(q))
+	var out []settingID
+	for i, id := range all {
+		t := cli.Fold(text(i))
+		ok := true
+		for _, w := range words {
+			if !strings.Contains(t, w) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// settingSelected, seçili ayar; süzgeç hiçbir şey bulmadıysa -1.
 func (m Model) settingSelected() settingID {
-	ids := settingIDs()
+	ids := m.shownSettingIDs()
+	if len(ids) == 0 {
+		return -1
+	}
 	return ids[max(0, min(m.set.cursor, len(ids)-1))]
 }
 
@@ -172,7 +235,16 @@ func (m Model) settingValue(id settingID) string {
 	case setVolume:
 		return fmt.Sprintf("%d", c.Soloist.InitialVolume)
 	case setResume:
-		return onOff(c.Soloist.Resume)
+		return T("set.onstart." + orDefault(c.Soloist.OnStart, "paused"))
+	case setCrossfade:
+		if c.Soloist.Crossfade <= 0 {
+			return T("set.off")
+		}
+		return F("set.crossfade.s", c.Soloist.Crossfade)
+	case setQuality:
+		return T("set.quality." + orDefault(c.Soloist.Quality, "very_high"))
+	case setNormalize:
+		return onOff(c.Soloist.Normalize)
 	case setSoloist:
 		return m.soloistValue()
 	case setSoloistAuto:
@@ -189,6 +261,11 @@ func (m Model) settingValue(id settingID) string {
 		return onOff(c.Desktop.MediaControls)
 	case setStartMenu:
 		return onOff(c.Desktop.StartMenu)
+	case setDiscord:
+		if c.Desktop.Discord && strings.TrimSpace(c.Desktop.DiscordAppID) == "" {
+			return T("set.discord.noid")
+		}
+		return onOff(c.Desktop.Discord)
 	case setExtras:
 		return onOff(c.Extras.Enabled)
 	case setLineNumbers:
@@ -202,14 +279,25 @@ func (m Model) settingValue(id settingID) string {
 		return T("set.progress."+orDefault(c.Look.Progress, "line")) + "  " + theme.Bar(5, 9)
 	case setStrip:
 		return T("set.strip." + orDefault(c.Look.Strip, "bottom"))
+	case setMenuPos:
+		return T("set.menupos." + orDefault(c.Look.Menu, "left"))
+	case setLayout:
+		return T("set.layout." + orDefault(c.Look.Layout, "plain"))
 	case setMouse:
 		return onOff(c.Look.Mouse)
+	case setButtons:
+		return onOff(c.Look.Buttons)
 	case setVisualizer:
 		v := T("set.viz." + orDefault(c.Look.Visualizer, "off"))
 		if m.rt.viz.err != nil {
 			v += " · " + m.rt.viz.err.Error()
 		}
 		return v
+	case setPrivate:
+		if m.privateOn() {
+			return F("priv.until", m.rt.privUntil.Format("15:04"))
+		}
+		return T("set.off")
 	case setAccount, setConfigFile, setKeymap, setThemes:
 		return T("set.open")
 	}
@@ -282,8 +370,14 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 	case setStrip:
 		c.Look.Strip = cycleOf([]string{"bottom", "top"}, orDefault(c.Look.Strip, "bottom"), d)
 		m.rt.gfx.drawn = nil // kapaklar yer değiştirdi
+	case setMenuPos:
+		c.Look.Menu = cycleOf([]string{"left", "right", "hidden"}, orDefault(c.Look.Menu, "left"), d)
+	case setLayout:
+		c.Look.Layout = cycleOf([]string{"plain", "boxed"}, orDefault(c.Look.Layout, "plain"), d)
 	case setMouse:
 		c.Look.Mouse = !c.Look.Mouse
+	case setButtons:
+		c.Look.Buttons = !c.Look.Buttons
 	case setVisualizer:
 		c.Look.Visualizer = cycleOf([]string{"now", "strip", "off"}, orDefault(c.Look.Visualizer, "off"), d)
 		m.rt.viz.tried, m.rt.viz.err = time.Time{}, nil // hemen yeniden denensin
@@ -304,7 +398,33 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 	case setVolume:
 		c.Soloist.InitialVolume = max(0, min(100, c.Soloist.InitialVolume+5*d))
 	case setResume:
-		c.Soloist.Resume = !c.Soloist.Resume
+		c.Soloist.OnStart = cycleOf([]string{"paused", "play", "off"}, orDefault(c.Soloist.OnStart, "paused"), d)
+	case setCrossfade, setQuality, setNormalize:
+		switch id {
+		case setCrossfade:
+			i := 0
+			for j, s := range soloist.CrossfadeSteps {
+				if s <= c.Soloist.Crossfade {
+					i = j
+				}
+			}
+			c.Soloist.Crossfade = soloist.CrossfadeSteps[cycle(i, d, len(soloist.CrossfadeSteps))]
+		case setQuality:
+			c.Soloist.Quality = cycleOf(soloist.Qualities, orDefault(c.Soloist.Quality, "very_high"), d)
+		case setNormalize:
+			c.Soloist.Normalize = !c.Soloist.Normalize
+		}
+		if err := c.Save(); err != nil {
+			return m.say(err.Error()), nil
+		}
+		// Soloist ayarı yalnız açılırken okur. Art arda basışlarda bir kez
+		// yeniden başlatılsın diye kısa bir bekleme.
+		m.set.applySeq++
+		seq := m.set.applySeq
+		if m.rt.proc == nil || m.rt.proc.Attached {
+			return m.note(T("set.applied.next")), nil
+		}
+		return m.note(T("set.saved")), tea.Tick(prefsDelay, func(time.Time) tea.Msg { return applyPrefsMsg{seq} })
 	case setSoloist:
 		return m.updateSoloist(false)
 	case setSoloistAuto:
@@ -318,6 +438,16 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 			}
 		}
 		c.Desktop.Notify = modes[cycle(i, d, len(modes))]
+	case setDiscord:
+		c.Desktop.Discord = !c.Desktop.Discord
+		if err := c.Save(); err != nil {
+			return m.say(err.Error()), nil
+		}
+		m.syncDiscord()
+		if c.Desktop.Discord && strings.TrimSpace(c.Desktop.DiscordAppID) == "" {
+			return m.say(T("set.discord.howid")), nil
+		}
+		return m.note(T("set.saved")), nil
 	case setStartMenu:
 		c.Desktop.StartMenu = !c.Desktop.StartMenu
 		if err := c.Save(); err != nil {
@@ -341,6 +471,8 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 		if !c.Extras.Enabled {
 			m.prof.view = nil // ✱ bilgisi artık gösterilmez
 		}
+	case setPrivate:
+		return m.togglePrivate()
 	case setAccount:
 		if err := openBrowser("https://www.spotify.com/account/"); err != nil {
 			return m.say(err.Error()), nil
@@ -362,7 +494,7 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 	// Renkler ya da yerleşim değişince ekran baştan boyanır ve kapak resimlerinin
 	// üstü de boyanır: resimleri (boyut değişimindeki gibi) yeniden gönder.
 	switch id {
-	case setTheme, setAccent, setCovers, setBorder, setIcons, setProgress, setStrip, setLineNumbers, setLanguage:
+	case setTheme, setAccent, setCovers, setBorder, setIcons, setProgress, setStrip, setLineNumbers, setLanguage, setMenuPos, setLayout:
 		m.rt.gfx.drawn = nil
 		return m.note(note), m.afterResize()
 	}
@@ -370,7 +502,10 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 }
 
 func (m Model) settingsKey(k string) (Model, tea.Cmd, bool) {
-	n := len(settingIDs())
+	n := len(m.shownSettingIDs())
+	if n == 0 && k != "esc" && k != "backspace" {
+		return m, nil, k == "up" || k == "k" || k == "down" || k == "j" || k == "enter" || k == "left" || k == "right"
+	}
 	switch k {
 	case "up", "k":
 		m.set.cursor = max(0, m.set.cursor-1)
@@ -403,8 +538,37 @@ func (m Model) settingsView(w, h int) []string {
 	ends := []bool{false, false, false} // satır bir ayar mı (başlık ya da boşluk değil)
 	active := m.focus == focusContent
 	sel := m.settingSelected()
-	for _, r := range settingRows {
+	shown := m.shownSettingIDs()
+	visible := map[settingID]bool{}
+	for _, id := range shown {
+		visible[id] = true
+	}
+	if m.set.find.active() {
+		rows[2] = findBar(m.set.find, len(shown), len(settingIDs()), w)
+		if len(shown) == 0 {
+			return append(rows, "", theme.Faint.Render(T("find.none")))
+		}
+	}
+	// hasShown: bölümün (i'den sonraki başlığa kadar) görünen ayarı var mı.
+	hasShown := func(i int) bool {
+		for _, r := range settingRows[i+1:] {
+			if r.id < 0 {
+				return false
+			}
+			if visible[r.id] {
+				return true
+			}
+		}
+		return false
+	}
+	for i, r := range settingRows {
+		if r.id >= 0 && !visible[r.id] {
+			continue
+		}
 		if r.id < 0 {
+			if !hasShown(i) {
+				continue
+			}
 			if len(rows) > 3 {
 				rows, ends = append(rows, ""), append(ends, false)
 			}
@@ -424,7 +588,7 @@ func (m Model) settingsView(w, h int) []string {
 	}
 	// Seçili ayarın kısa açıklaması.
 	var help []string
-	if key := "set.help." + settingNames[sel]; T(key) != key {
+	if key := "set.help." + settingNames[sel]; sel >= 0 && T(key) != key {
 		help = []string{"", theme.Faint.Render(truncate(T(key), w))}
 	}
 	// Pencereye sığmıyorsa seçili satır görünecek kadar kaydır (başlık kalır).
@@ -517,6 +681,12 @@ func shortVersion(v string) string {
 
 func (m Model) updateSettingsMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case applyPrefsMsg:
+		if msg.seq != m.set.applySeq {
+			return m, nil // arkasından bir değişiklik daha geldi
+		}
+		return m.restartSoloist()
+
 	case soloistBuildMsg:
 		if msg.err != nil {
 			m.set.build, m.set.buildErr = nil, msg.err

@@ -31,7 +31,7 @@ var Remote = map[string]bool{
 // commands: bilinen bütün komutlar (sotto <komut>).
 var commands = map[string]bool{
 	"search": true, "devices": true, "queue": true, "playlist": true,
-	"doctor": true, "help": true, "version": true, "theme": true,
+	"doctor": true, "help": true, "version": true, "theme": true, "history": true,
 }
 
 // IsCommand, ilk argüman bir komut mu (değilse arayüz açılır).
@@ -79,6 +79,8 @@ func Main(cfg config.Config, args []string, stdout, stderr io.Writer, stdin io.R
 		return Doctor(cfg, stdout, asJSON)
 	case "theme":
 		return Theme(cfg, cargs, stdout, stderr)
+	case "history":
+		return History(cfg, cargs, stdout, stderr, asJSON)
 	}
 	if !IsCommand(cmd) {
 		fmt.Fprintf(stderr, "sotto: unknown command %q (sotto help lists them)\n", cmd)
@@ -226,6 +228,9 @@ Library:
         make a theme from a terminal colour scheme: iTerm2 .itermcolors,
         Alacritty .toml or .yml, or a Windows Terminal scheme .json
 
+  sotto history [week|month|year|all]
+                            what you listened to while sotto was open, with
+                            the most played songs and artists (--json too)
   sotto doctor              check the setup
   --json                    machine-readable output for any command
 `

@@ -26,6 +26,7 @@ type library struct {
 	open *trackList // nil: liste düzeyi
 
 	root   *spclient.Rootlist // kitaplığın sırası ve klasörleri (✱, folders.go)
+	pins   []string           // Spotify'da sabitlenenler, en son sabitlenen önce (✱, pins.go)
 	folder string             // "Hepsi"nde içinde bulunulan klasör ("" kök)
 
 	// Kayıtlı albümler, sanatçılar, podcast'ler (library_saved.go).
@@ -113,6 +114,7 @@ func (m Model) libVisible() []libEntry {
 		}
 		vis = sortEntries(vis, m.lib.sortBy, m.lib.desc, pos)
 	}
+	vis = m.withPins(vis)
 	if q := m.lib.find.query; q != "" {
 		order := matchOrder(nil, len(vis), func(i int) string { return vis[i].name + " " + vis[i].owner }, q)
 		out := make([]libEntry, 0, len(order))
@@ -489,6 +491,8 @@ func (m Model) libraryView(w, h int) []string {
 		return append(rows, theme.Dim.Render(T("lib.f.none")))
 	}
 	end := min(len(vis), l.scroll+m.listHeight())
+	barW := scrollbarW(len(vis), m.listHeight())
+	listStart := len(rows)
 	for i := l.scroll; i < end; i++ {
 		e := vis[i]
 		mark := "  "
@@ -498,6 +502,9 @@ func (m Model) libraryView(w, h int) []string {
 		name := e.name
 		if e.kind == kindLiked {
 			name = theme.Icon.Heart + " " + name
+		}
+		if e.pinned {
+			name = theme.Icon.Pin + " " + name
 		}
 		info := F("lib.songs", e.total)
 		switch {
@@ -513,9 +520,9 @@ func (m Model) libraryView(w, h int) []string {
 		case e.kind == kindPlaylist && !m.mine(e) && e.owner != "":
 			info = e.owner + " · " + info // takip ettiğin listenin sahibi
 		}
-		rows = append(rows, mark+row(name, info, w-2, active && i == l.cursor))
+		rows = append(rows, mark+row(name, info, w-2-barW, active && i == l.cursor))
 	}
-	return rows
+	return withScrollbar(rows, listStart, len(vis), l.scroll, m.listHeight(), w)
 }
 
 // likedName, beğenilenlerin geçerli dildeki adı.

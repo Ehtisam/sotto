@@ -160,3 +160,44 @@ func TestLiveRootlistFolders(t *testing.T) {
 	}
 	t.Log("folder deleted, list kept")
 }
+
+// TestLivePinsRead yalnızca okur: SOTTO_LIVE=1 go test ./internal/spclient -run LivePinsRead -v
+func TestLivePinsRead(t *testing.T) {
+	ctx, tok, user := liveAccount(t)
+	pins, err := Pins(ctx, tok, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pins {
+		t.Logf("%s  %d", p.URI, p.AddedAt)
+	}
+	t.Logf("%d pinned", len(pins))
+}
+
+// TestLiveRecommendations yalnızca okur.
+func TestLiveRecommendations(t *testing.T) {
+	ctx, tok, _ := liveAccount(t)
+	recs, err := Recommendations(ctx, tok, "spotify:track:4cOdK2wGLETKBW3PvgPWqT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) < 10 {
+		t.Fatalf("only %d suggestions", len(recs))
+	}
+	t.Logf("%d suggestions, first %s", len(recs), recs[0])
+}
+
+// TestLivePrivateSession özel oturumu açar ve hemen kapatır.
+// SOTTO_LIVE=1 SOTTO_LIVE_WRITE=1 go test ./internal/spclient -run LivePrivateSession -v
+func TestLivePrivateSession(t *testing.T) {
+	if os.Getenv("SOTTO_LIVE_WRITE") == "" {
+		t.Skip("SOTTO_LIVE_WRITE not set")
+	}
+	ctx, tok, _ := liveAccount(t)
+	if err := SetPrivateSession(ctx, tok, true); err != nil {
+		t.Fatal("on:", err)
+	}
+	if err := SetPrivateSession(ctx, tok, false); err != nil {
+		t.Fatal("off:", err)
+	}
+}

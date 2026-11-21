@@ -152,7 +152,7 @@ func TestSortMenuSortsFlipsAndRemembers(t *testing.T) {
 	if !m.sortm.open {
 		t.Fatal("shift+O did not open the sort menu")
 	}
-	// Seçenekler: kendi sırası, ad, sanatçı, albüm, eklenme, süre.
+	// Seçenekler: kendi sırası, ad, sanatçı, albüm, çıkış tarihi, eklenme, süre.
 	m = m.pressKey("j") // ad
 	m = m.pressKey("enter")
 	tl := m.lib.open
@@ -174,9 +174,9 @@ func TestSortMenuSortsFlipsAndRemembers(t *testing.T) {
 	if got := order(); got != "dcba" || !tl.desc {
 		t.Fatalf("flipped %s", got)
 	}
-	// Süreye göre.
+	// Süreye göre (menüde altıncı: kendi, ad, sanatçı, albüm, çıkış, eklenme, süre).
 	m = m.pressKey("O")
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		m = m.pressKey("j")
 	}
 	m = m.pressKey("enter")
@@ -243,5 +243,36 @@ func TestFindPasteAddsToQuery(t *testing.T) {
 	m = settle(out.(Model), cmd)
 	if m.lib.open.find.query != "digital" || m.lib.open.rows() != 1 {
 		t.Fatalf("query %q rows %d", m.lib.open.find.query, m.lib.open.rows())
+	}
+}
+
+// Çıkış tarihine göre: albümün tarihi; "1997" gibi yalnız yıl da doğru sıralanır.
+func TestSortByReleaseDate(t *testing.T) {
+	_, m := findList(t)
+	dates := []string{"2001-03-12", "2019-03-29", "2018", "1997-01-20"} // a b c d
+	for i, d := range dates {
+		m.lib.open.tracks[i].Album = spotify.Album{Name: "Album " + d, ReleaseDate: d}
+	}
+	m = m.pressKey("O")
+	i := 0
+	for ; i < len(m.sortm.choices) && m.sortm.choices[i] != sortReleased; i++ {
+	}
+	if i == len(m.sortm.choices) {
+		t.Fatalf("no release-date choice in %v", m.sortm.choices)
+	}
+	for j := 0; j < i; j++ {
+		m = m.pressKey("j")
+	}
+	m = m.pressKey("enter")
+	tl := m.lib.open
+	var got string
+	for p := 0; p < tl.rows(); p++ {
+		got += tl.tracks[tl.at(p)].URI[len("spotify:track:"):]
+	}
+	if got != "dacb" {
+		t.Fatalf("by release date %s, want dacb", got)
+	}
+	if !strings.Contains(sortLabel(tl.sortBy, tl.desc), "Release date") {
+		t.Fatalf("label %q", sortLabel(tl.sortBy, tl.desc))
 	}
 }

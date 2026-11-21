@@ -26,11 +26,12 @@ const (
 	extraTop
 	extraRecent
 	extraLog
-	extraArtist // sanatçı sayfası (artist.go)
-	extraInfo   // ayrıntılar ve künye (info.go)
-	extraNews   // Yenilikler (news.go)
-	extraPeople // takipçiler, takip edilenler, arkadaş etkinliği (people.go)
-	extraUser   // başka bir kullanıcının profili (people.go)
+	extraArtist  // sanatçı sayfası (artist.go)
+	extraInfo    // ayrıntılar ve künye (info.go)
+	extraNews    // Yenilikler (news.go)
+	extraPeople  // takipçiler, takip edilenler, arkadaş etkinliği (people.go)
+	extraUser    // başka bir kullanıcının profili (people.go)
+	extraHistory // dinleme geçmişi ve istatistik (histpage.go)
 )
 
 type extraState struct {
@@ -56,6 +57,7 @@ type extraState struct {
 	news   *newsState
 	people *peopleState
 	user   *userState
+	hist   *histState
 
 	// prev: bu sayfa başka bir ek sayfanın üstünde açıldıysa o (esc ona döner).
 	prev *extraState
@@ -174,6 +176,8 @@ func (m *Model) rebuildExtra() {
 		x.items = m.peopleItems()
 	case extraUser:
 		x.items = m.userItems()
+	case extraHistory:
+		x.items = m.histItems()
 	case extraLog:
 		// Yeni kayıtlar üste eklenir: imleç aynı kayıtta kalsın.
 		old := len(x.items)
@@ -348,6 +352,9 @@ func (m Model) extraKey(k string) (Model, tea.Cmd, bool) {
 		case extraNews:
 			mm, cmd := m.switchNewsSection(d)
 			return mm, cmd, true
+		case extraHistory:
+			mm, cmd := m.switchHistRange(d)
+			return mm, cmd, true
 		}
 		return m, nil, false
 	case "[", "]":
@@ -484,6 +491,8 @@ func anySelectable(items []searchItem) bool {
 // extraHeader, kendi başlığını çizen ek sayfaların başlığı (4 satır).
 func (m Model) extraHeader(w int) ([]string, bool) {
 	switch m.extra.page {
+	case extraHistory:
+		return m.histHeader(w), true
 	case extraArtist:
 		return m.artistHeader(w), true
 	case extraInfo:
@@ -511,6 +520,11 @@ func (m Model) extraEmpty() (text string, bad bool) {
 		return m.peopleEmpty()
 	case extraUser:
 		return m.userEmpty()
+	case extraHistory:
+		if h := m.extra.hist; h != nil && h.err != nil {
+			return h.err.Error(), true
+		}
+		return T("hist.empty"), false
 	}
 	return T("extra.empty"), false
 }
@@ -530,6 +544,10 @@ func (m Model) reloadExtra() (Model, tea.Cmd, bool) {
 		return m, tea.Batch(cmds...), true
 	case extraInfo:
 		return m, m.loadInfo(x.info), true
+	case extraHistory:
+		m.loadHistory()
+		m.rebuildExtra()
+		return m, nil, true
 	case extraNews:
 		x.news.loading = true
 		return m, m.loadNews(), true

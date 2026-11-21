@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ehtisam/sotto/internal/config"
+	"github.com/Ehtisam/sotto/internal/history"
 	"github.com/Ehtisam/sotto/internal/spotify"
 )
 
@@ -153,5 +155,28 @@ func TestFriendlyAndDisallowed(t *testing.T) {
 	st.Actions.Disallows = map[string]bool{"toggling_repeat_context": true}
 	if !Disallowed(st, "volume", "") || !Disallowed(st, "repeat:context", "off") || !Disallowed(st, "repeat:off", "context") || Disallowed(st, "repeat:track", "off") || Disallowed(nil, "volume", "") {
 		t.Fatal("Disallowed")
+	}
+}
+
+func TestHistoryCommand(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{LocalDir: dir, ConfigDir: dir}
+	now := time.Now()
+	for i, title := range []string{"A", "A", "B"} {
+		_ = history.Append(dir, history.Play{At: now.Add(-time.Duration(i+1) * time.Hour), URI: "spotify:track:" + title, Title: title, Artist: "X", MS: 200000})
+	}
+	var out, errb strings.Builder
+	if code := Main(cfg, []string{"history"}, &out, &errb, strings.NewReader("")); code != 0 {
+		t.Fatalf("code %d: %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "3 plays") || !strings.Contains(out.String(), "1. A — X  (2)") {
+		t.Fatalf("output:\n%s", out.String())
+	}
+	out.Reset()
+	if code := Main(cfg, []string{"history", "all", "--json"}, &out, &errb, strings.NewReader("")); code != 0 || !strings.Contains(out.String(), `"plays": 3`) {
+		t.Fatalf("json (%d):\n%s", code, out.String())
+	}
+	if code := Main(cfg, []string{"history", "decade"}, &out, &errb, strings.NewReader("")); code != 2 {
+		t.Fatalf("bad range code %d", code)
 	}
 }

@@ -32,6 +32,8 @@ type rootlistMsg struct {
 	follow string // imleç bu anahtara (liste ya da klasör kimliği) gitsin
 	login  string
 	err    error
+	pins   []string // sabitlenenler (✱, en son sabitlenen önce); okunduysa pinsRead
+	pinsOK bool
 }
 
 var errFolderSelf = errors.New("folder into itself")
@@ -71,6 +73,13 @@ func (m Model) rootEdit(build func(r spclient.Rootlist) ([]spclient.Op, error), 
 				}
 				if build == nil {
 					msg.root = &r
+					// Sabitlenenler de (yalnız okuma); okunamazsa sessizce yok.
+					if ps, err := spclient.Pins(ctx, tok, user); err == nil {
+						for _, p := range ps {
+							msg.pins = append(msg.pins, p.URI)
+						}
+						msg.pinsOK = true
+					}
 					return nil
 				}
 				ops, err := build(r)
@@ -117,6 +126,9 @@ func (m Model) updateRootlist(msg rootlistMsg) (Model, tea.Cmd) {
 	}
 	if msg.root != nil {
 		m.lib.root = msg.root
+	}
+	if msg.pinsOK {
+		m.lib.pins = msg.pins
 	}
 	if m.lib.folder != "" {
 		if _, ok := m.lib.root.FolderByID(m.lib.folder); !ok {

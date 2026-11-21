@@ -61,16 +61,19 @@ func TestDriveSettingsDesktopRows(t *testing.T) {
 	d := drive(t)
 	before, _ := config.Load()
 	d.do("8<wait:600>")
-	s := d.screen()
-	for _, want := range []string{"Soloist build", "days left", "Continue where you left off"} {
-		if !strings.Contains(s, want) && !strings.Contains(s, map[string]string{"Soloist build": "Soloist sürümü", "days left": "gün kaldı", "Continue where you left off": "Kaldığın yerden devam"}[want]) {
-			t.Fatalf("settings lack %q:\n%s", want, s)
+	// Satırlar pencereye sığmıyor: inerken görünenleri topla.
+	seen := d.screen()
+	for i := 0; i < 40 && d.model().settingSelected() != setNotify; i++ {
+		d.do("<down><wait:80>")
+		seen += d.screen()
+	}
+	for _, want := range []string{"Soloist build", "days left", "Last song on opening", "Crossfade", "Layout"} {
+		if !strings.Contains(seen, want) && !strings.Contains(seen, map[string]string{"Soloist build": "Soloist sürümü", "days left": "gün kaldı", "Last song on opening": "Açılışta son şarkı", "Crossfade": "Şarkılar arası geçiş", "Layout": "Düzen"}[want]) {
+			t.Fatalf("settings lack %q:\n%s", want, d.screen())
 		}
 	}
-	// Bildirim satırına in, değiştir, geri al.
-	for i := 0; i < 15 && d.model().settingSelected() != setNotify; i++ {
-		d.do("<down><wait:80>")
-	}
+	// Bildirim satırında değiştir, geri al.
+	var s string
 	if d.model().settingSelected() != setNotify {
 		t.Fatal("notify row not reachable")
 	}

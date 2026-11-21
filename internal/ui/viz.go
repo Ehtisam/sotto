@@ -25,6 +25,13 @@ type vizState struct {
 	tried   time.Time // son başlatma denemesi
 	unused  time.Time // görünmez olduğu an (bir süre sonra kapatılır)
 	ticking bool
+
+	peaks  []float64   // tam ekran: tepe çizgileri / VU tepesi (vizfull.go)
+	held   []time.Time // tepenin son yükseldiği an (bir süre asılı kalır)
+	peakAt time.Time
+
+	peakDB   float64   // tutulan tepe değeri (dBFS), başlıkta yazar
+	peakDBAt time.Time // ne zaman tutuldu
 }
 
 type vizStartedMsg struct {
@@ -39,6 +46,9 @@ var startViz = audio.Start
 
 // vizWanted: görselleştirme şu an ekranda.
 func (m Model) vizWanted() bool {
+	if m.vizFull && m.soloistActive() && m.playing() && !m.miniMode() {
+		return true // tam ekran (V): ayar kapalı olsa da
+	}
 	mode := m.cfg.Look.Visualizer
 	if mode != "now" && mode != "strip" {
 		return false

@@ -42,6 +42,7 @@ type libEntry struct {
 	ownerID       string // listeler: sahibinin kullanıcı kimliği
 	collaborative bool
 	public        bool // listeler: profilde herkese açık
+	pinned        bool // Spotify'da sabitlenmiş (Kitaplık'ta üstte; pins.go)
 }
 
 var tagRE = regexp.MustCompile(`<[^>]*>`)
@@ -396,6 +397,8 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 	if m.cfg.Look.LineNumbers == "off" {
 		numW = 2
 	}
+	barW := scrollbarW(n, m.listHeight())
+	listStart := len(rows)
 	for p := tl.scroll; p < end; p++ {
 		i := tl.at(p)
 		t := tl.tracks[i]
@@ -420,8 +423,9 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 		default:
 			right = t.ArtistNames() + "  " + right
 		}
-		rows = append(rows, num+row(t.Name, right, w-numW, active && i == tl.cursor))
+		rows = append(rows, num+row(t.Name, right, w-numW-barW, active && i == tl.cursor))
 	}
+	rows = withScrollbar(rows, listStart, n, tl.scroll, m.listHeight(), w)
 	if tl.loading && len(tl.tracks) > 0 && end == n {
 		rows = append(rows, theme.Faint.Render("     "+T("lib.loading")))
 	}

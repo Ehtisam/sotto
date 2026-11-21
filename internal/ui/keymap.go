@@ -165,6 +165,8 @@ func (m Model) runCommand(action string) (tea.Model, tea.Cmd) {
 		return m.openNews()
 	case "go_people":
 		return m.openPeople("", "", pplFollowers)
+	case "go_history":
+		return m.openHistory()
 	}
 	return m, nil
 }

@@ -59,6 +59,7 @@ var Catalog = []Action{
 	{"go_log", []string{"g o"}, "", "help.g.log", "pages"},
 	{"go_news", []string{"g w"}, "", "help.g.news", "pages"},
 	{"go_people", []string{"g f"}, "", "help.g.people", "pages"},
+	{"go_history", []string{"g y"}, "", "help.g.history", "pages"},
 	{"search", []string{"/"}, "/", "help.search", "pages"},
 
 	// çalma
@@ -74,6 +75,7 @@ var Catalog = []Action{
 	{"shuffle", []string{"s"}, "s", "help.shuf", "play"},
 	{"repeat", []string{"r"}, "r", "help.rep", "play"},
 	{"switch_speaker", []string{"t"}, "t", "help.switch", "play"},
+	{"device_picker", []string{"d"}, "d", "help.devpick", "play"},
 	{"soloist", []string{"o"}, "o", "help.solo", "play"},
 	{"sleep", []string{"z"}, "z", "help.sleep", "play"},
 
@@ -94,6 +96,7 @@ var Catalog = []Action{
 	// genel
 	{"lyrics", []string{"l"}, "l", "help.lyrics", "other"},
 	{"lyrics_login", []string{"L"}, "L", "help.lyrlogin", "other"},
+	{"visualizer", []string{"V"}, "V", "help.vizfull", "other"},
 	{"help", []string{"?"}, "?", "help.keys", "other"},
 	{"quit", []string{"q"}, "q", "help.quit", "other"},
 }

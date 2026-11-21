@@ -48,15 +48,19 @@ type Look struct {
 	// kare görünmüyorsa elle ayarlanır (ör. 0.45).
 	CellRatio float64 `toml:"cell_ratio"`
 
-	LineNumbers string `toml:"line_numbers"` // absolute, relative ya da off
-	Border      string `toml:"border"`       // line, heavy, double, dashed, ascii ya da none
-	Icons       string `toml:"icons"`        // unicode, ascii ya da nerd
-	Strip       string `toml:"strip"`        // çalan şarkı şeridi: bottom ya da top
-	StripFormat string `toml:"strip_format"` // şeridin ilk satırı: {title} {artist} {album} {context} {device}
-	Progress    string `toml:"progress"`     // ilerleme çubuğu: line, block, dots ya da thin
-	WindowTitle string `toml:"window_title"` // pencere başlığı; aynı alanlar
-	Mouse       bool   `toml:"mouse"`        // fare: tıklama ve tekerlek
-	Visualizer  string `toml:"visualizer"`   // ses görselleştirmesi: now, strip ya da off
+	LineNumbers string `toml:"line_numbers"`  // absolute, relative ya da off
+	Border      string `toml:"border"`        // line, heavy, double, dashed, ascii ya da none
+	Icons       string `toml:"icons"`         // unicode, ascii ya da nerd
+	Strip       string `toml:"strip"`         // çalan şarkı şeridi: bottom ya da top
+	StripFormat string `toml:"strip_format"`  // şeridin ilk satırı: {title} {artist} {album} {context} {device}
+	Progress    string `toml:"progress"`      // ilerleme çubuğu: line, block, dots ya da thin
+	WindowTitle string `toml:"window_title"`  // pencere başlığı; aynı alanlar
+	Mouse       bool   `toml:"mouse"`         // fare: tıklama ve tekerlek
+	Visualizer  string `toml:"visualizer"`    // ses görselleştirmesi: now, strip ya da off
+	Menu        string `toml:"menu"`          // sayfa menüsünün yeri: left, right ya da hidden
+	Buttons     bool   `toml:"strip_buttons"` // şeritte tıklanabilir düğmeler
+	VizStyle    string `toml:"viz_style"`     // tam ekran görselleştirme (V): bars, winamp, scope, vu, cassette
+	Layout      string `toml:"layout"`        // plain (çizgiler) ya da boxed (kutular)
 }
 
 // CoversOn: kapaklar çizilsin mi.
@@ -83,6 +87,9 @@ type Desktop struct {
 	// StartMenu: Başlat menüsünde kısayol (Windows medya kartında ve
 	// bildirimlerde "sotto" adı ve simgesi için gerekli).
 	StartMenu bool `toml:"start_menu"`
+	// Discord'da "şu an dinliyor"; kimlik Discord geliştirici sitesindeki uygulamanın.
+	Discord      bool   `toml:"discord"`
+	DiscordAppID string `toml:"discord_app_id"`
 }
 
 // Hooks: olaylarda çalıştırılan komutlar.
@@ -92,9 +99,18 @@ type Hooks struct {
 }
 
 type Soloist struct {
-	Autostart     bool   `toml:"autostart"`
-	Resume        bool   `toml:"resume"`
-	AutoUpdate    bool   `toml:"auto_update"`
+	Autostart bool `toml:"autostart"`
+	// OnStart: açılışta hiçbir yerde bir şey çalmıyorsa "paused" (kaldığın yeri
+	// duraklatılmış yükle), "play" (kaldığın yerden çal) ya da "off".
+	OnStart    string `toml:"on_start"`
+	Crossfade  int    `toml:"crossfade"` // şarkılar arası geçiş, sn (0: kapalı)
+	Quality    string `toml:"quality"`   // normal, high ya da very_high
+	Normalize  bool   `toml:"normalize"` // ses düzeyini eşitle
+	AutoUpdate bool   `toml:"auto_update"`
+
+	// Eski sürümlerin "resume = true/false" ayarı; okunur, on_start'a çevrilir.
+	Resume *bool `toml:"resume"`
+
 	APIKey        string `toml:"api_key"`
 	Path          string `toml:"path"`
 	DeviceName    string `toml:"device_name"`
@@ -102,6 +118,26 @@ type Soloist struct {
 
 	// Eski sürümlerden kalan ad; okunur, yazılmaz.
 	Enabled *bool `toml:"enabled"`
+}
+
+// normalize: eski "resume"u on_start'a çevirir, bilinmeyen değerleri düzeltir.
+func (s *Soloist) normalize() {
+	// "resume" yalnız eski dosyalarda olur (yenisi yazılmaz).
+	if s.Resume != nil && !*s.Resume {
+		s.OnStart = "off"
+	}
+	s.Resume = nil
+	switch s.OnStart {
+	case "paused", "play", "off":
+	default:
+		s.OnStart = "paused"
+	}
+	switch s.Quality {
+	case "normal", "high", "very_high":
+	default:
+		s.Quality = "very_high"
+	}
+	s.Crossfade = max(0, min(12, s.Crossfade))
 }
 
 // Görünüm varsayılanları.
@@ -112,7 +148,7 @@ const (
 
 func defaults() Config {
 	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "image", LineNumbers: "absolute", Border: "line",
-		Icons: "unicode", Strip: "bottom", StripFormat: DefaultStripFormat, Progress: "line", WindowTitle: DefaultWindowTitle, Mouse: true, Visualizer: "now"}, Soloist: Soloist{Autostart: true, Resume: true, AutoUpdate: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true},
+		Icons: "unicode", Strip: "bottom", StripFormat: DefaultStripFormat, Progress: "line", WindowTitle: DefaultWindowTitle, Mouse: true, Visualizer: "now", Menu: "left", Layout: "plain", VizStyle: "bars"}, Soloist: Soloist{Autostart: true, OnStart: "paused", Quality: "very_high", Normalize: true, AutoUpdate: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true},
 		Desktop: Desktop{Notify: "unfocused", NotifyTitle: "{title}", NotifyBody: "{artist} · {album}", MediaControls: true, StartMenu: true}}
 }
 
@@ -143,7 +179,7 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("%s: %w", c.ConfigFile(), err)
 		}
 		// Yeni sürümle gelen bölümler dosyada yoksa açıklamalarıyla eklensin.
-		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]", "[desktop]", "[hooks]", "resume =", "auto_update =", "start_menu =", "line_numbers =", "[colors]", "visualizer ="} {
+		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]", "[desktop]", "[hooks]", "on_start =", "crossfade =", "auto_update =", "start_menu =", "line_numbers =", "[colors]", "visualizer =", "layout =", "discord ="} {
 			if !strings.Contains(string(b), section) {
 				exists = false
 			}
@@ -156,6 +192,7 @@ func Load() (Config, error) {
 	if c.Soloist.DeviceName == "" {
 		c.Soloist.DeviceName = "sotto"
 	}
+	c.Soloist.normalize()
 
 	// Eski: ayrı anahtar dosyası.
 	oldKey := filepath.Join(c.ConfigDir, "soloist.key")
@@ -205,9 +242,16 @@ func (c Config) Save() error {
 		quote(c.Look.WindowTitle),
 		c.Look.Mouse,
 		quote(c.Look.Visualizer),
+		quote(c.Look.Menu),
+		quote(c.Look.Layout),
+		c.Look.Buttons,
+		quote(c.Look.VizStyle),
 		quote(c.Spotify.ClientID),
 		c.Soloist.Autostart,
-		c.Soloist.Resume,
+		quote(c.Soloist.OnStart),
+		c.Soloist.Crossfade,
+		quote(c.Soloist.Quality),
+		c.Soloist.Normalize,
 		c.Soloist.AutoUpdate,
 		quote(c.Soloist.APIKey),
 		quote(c.Soloist.Path),
@@ -219,6 +263,8 @@ func (c Config) Save() error {
 		quote(c.Desktop.NotifyBody),
 		c.Desktop.MediaControls,
 		c.Desktop.StartMenu,
+		c.Desktop.Discord,
+		quote(c.Desktop.DiscordAppID),
 		quote(c.Hooks.OnTrackChange),
 		quote(c.Hooks.OnStatusChange),
 	)
@@ -233,7 +279,9 @@ const template = `# sotto settings
 language = %s
 
 [look]
-# Theme: "cardo", "night", "moss", "mono" or "paper" (light).
+# Theme: "cardo", "night", "moss", "mono", "paper" (light), "dracula", "nord",
+# "gruvbox", "catppuccin", "tokyonight", "solarized", "monokai" or "terminal"
+# (the terminal's own colours). Themes you import show up by their file name.
 theme = %s
 # Accent colour over the theme's own: "purple", "blue", "teal", "green", "amber",
 # "pink" or "red". Leave empty to keep the theme's.
@@ -269,6 +317,18 @@ mouse = %t
 # one in the strip) or "off". It listens to what this computer plays (Windows),
 # so it moves while music plays here, through Soloist.
 visualizer = %s
+# Where the page menu sits: "left", "right" or "hidden" (pages are still a
+# number away: 1-8).
+menu = %s
+# "plain" separates the parts of the screen with lines; "boxed" puts the menu,
+# the page and the now-playing strip in rounded boxes, the one in use coloured.
+layout = %s
+# Buttons in the now-playing strip for the mouse: previous, play/pause, next,
+# shuffle and repeat.
+strip_buttons = %t
+# Full-screen visualizer (shift+V): "bars", "winamp", "scope" (oscilloscope),
+# "vu" (a loudness meter) or "cassette". Left and right change it there too.
+viz_style = %s
 
 [spotify]
 # Client ID of your own Spotify app (https://developer.spotify.com/dashboard).
@@ -279,9 +339,19 @@ client_id = %s
 # Light mode plays through Spotify Soloist on this computer.
 # Start Soloist when sotto opens. You can also start and stop it with "o".
 autostart = %t
-# When nothing is playing anywhere, load where you left off (paused) once
-# Soloist is up.
-resume = %t
+# When sotto opens and nothing is playing anywhere: "paused" loads where you
+# left off without playing, "play" carries on playing from there, "off" does
+# nothing.
+on_start = %s
+# The settings below are Soloist's own; sotto writes them into Soloist's
+# settings file and they take effect when Soloist (re)starts. Changing them
+# on the Settings page restarts Soloist for you.
+# Crossfade between songs in seconds, 0 to 12 (0 is off).
+crossfade = %d
+# Sound quality: "normal" (96 kbps), "high" (160) or "very_high" (320).
+quality = %s
+# Keep every song at about the same loudness.
+normalize = %t
 # Each Soloist build stops working 90 days after it is made. With this on,
 # sotto downloads Spotify's newer build in the background when 14 days are
 # left; the music doesn't stop, the new build is used the next time Soloist starts.
@@ -313,6 +383,12 @@ media_controls = %t
 # media card and on notifications from there; without it the card says
 # "Unknown app".
 start_menu = %t
+# Show what you're listening to on your Discord profile (Discord must be open).
+# It needs the Application ID of an app made at
+# https://discord.com/developers/applications; its name shows as
+# "Listening to <name>".
+discord = %t
+discord_app_id = %s
 
 [hooks]
 # Commands run in the background (cmd /C on Windows, sh -c elsewhere). The
