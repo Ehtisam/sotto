@@ -91,6 +91,12 @@ func (c *Client) SetVolume(ctx context.Context, percent int) error {
 	return c.do(ctx, http.MethodPut, fmt.Sprintf("me/player/volume?volume_percent=%d", max(0, min(100, percent))), nil, nil)
 }
 
+// SetDeviceVolume, çalmayan bir cihazın da sesini değiştirmeyi dener
+// (Spotify her cihazda kabul etmiyor; etmezse 403/404 döner).
+func (c *Client) SetDeviceVolume(ctx context.Context, deviceID string, percent int) error {
+	return c.do(ctx, http.MethodPut, fmt.Sprintf("me/player/volume?volume_percent=%d&device_id=%s", max(0, min(100, percent)), url.QueryEscape(deviceID)), nil, nil)
+}
+
 func (c *Client) SetShuffle(ctx context.Context, on bool) error {
 	return c.do(ctx, http.MethodPut, fmt.Sprintf("me/player/shuffle?state=%t", on), nil, nil)
 }

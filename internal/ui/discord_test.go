@@ -4,23 +4,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Ehtisam/sotto/internal/config"
 	"github.com/Ehtisam/sotto/internal/discord"
 	"github.com/Ehtisam/sotto/internal/soloist"
 )
 
 // Discord durumu: Ayarlar'dan açılınca çalan şarkı gönderilir; durunca
-// temizlenir; kimlik yoksa bağlanılmaz ve nasıl alınacağı söylenir.
+// temizlenir. Kimlik verilmemişse sotto'nun kendi uygulaması kullanılır.
 func TestDiscordStatus(t *testing.T) {
 	acts, restore := discord.FakeForTest()
 	defer restore()
 	m := selectSetting(settingsModel(t), setDiscord)
 	m.cfg.Desktop.Discord, m.cfg.Desktop.DiscordAppID = false, ""
-	m, _, _ = m.settingsKey("enter")
-	if m.rt.discord != nil || m.settingValue(setDiscord) != T("set.discord.noid") {
-		t.Fatalf("no id: presence=%v value=%q", m.rt.discord != nil, m.settingValue(setDiscord))
+	if id := m.cfg.Desktop.DiscordID(); id != config.DefaultDiscordAppID {
+		t.Fatalf("default id = %q", id)
 	}
-	m, _, _ = m.settingsKey("enter") // kapat
-	m.cfg.Desktop.DiscordAppID = "123"
+	m.cfg.Desktop.DiscordAppID = " 123 "
+	if id := m.cfg.Desktop.DiscordID(); id != "123" {
+		t.Fatalf("own id = %q", id)
+	}
+	m.cfg.Desktop.DiscordAppID = ""
 	m.state.Item = nil
 	playingState(&m)
 	m, _, _ = m.settingsKey("enter")

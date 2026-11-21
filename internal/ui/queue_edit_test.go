@@ -98,3 +98,42 @@ func TestQueueEditSkipsNowPlaying(t *testing.T) {
 		t.Fatal("tried to remove the playing song")
 	}
 }
+
+func TestQueueClear(t *testing.T) {
+	m := queueAt(t, queueModel(t), "c1")
+	m.cfg.Extras.Enabled = true
+	mm, cmd, ok := m.queueKey("C")
+	if !ok || cmd == nil || !mm.qs.editing {
+		t.Fatal("no command sent")
+	}
+	if got := upcomingNames(mm); got != "c1  a1" {
+		t.Fatalf("queue = %q", got)
+	}
+	res, _ := mm.Update(queueEditMsg{clear: true, clearN: 1})
+	if r := res.(Model); r.qs.editing || !strings.Contains(r.flash, "Cleared 1") {
+		t.Fatalf("flash %q", r.flash)
+	}
+	// Eklenmiş bir şey kalmadıysa komut gitmez.
+	if _, cmd, _ := res.(Model).queueKey("C"); cmd != nil {
+		t.Fatal("clear sent with nothing queued")
+	}
+}
+
+func TestQueueClearInActionMenu(t *testing.T) {
+	m := queueAt(t, queueModel(t), "c1")
+	m.cfg.Extras.Enabled = true
+	m, _ = m.openActions()
+	found := false
+	for _, it := range m.menuItems() {
+		found = found || it.id == actClearQueue
+	}
+	if !found {
+		t.Fatal("no clear item on the queue page")
+	}
+	m.page = pageLibrary
+	for _, it := range m.menuItems() {
+		if it.id == actClearQueue {
+			t.Fatal("clear item outside the queue page")
+		}
+	}
+}

@@ -40,6 +40,10 @@ func TestQualityAndNormalizeCycle(t *testing.T) {
 	m := selectSetting(settingsModel(t), setQuality)
 	m.cfg.Soloist.Quality, m.cfg.Soloist.Normalize = "very_high", true
 	m, _, _ = m.settingsKey("right")
+	if m.cfg.Soloist.Quality != "lossless" || !strings.Contains(savedFile(t, m), `quality = "lossless"`) {
+		t.Fatalf("quality = %q", m.cfg.Soloist.Quality)
+	}
+	m, _, _ = m.settingsKey("right")
 	if m.cfg.Soloist.Quality != "normal" || !strings.Contains(savedFile(t, m), `quality = "normal"`) {
 		t.Fatalf("quality = %q", m.cfg.Soloist.Quality)
 	}

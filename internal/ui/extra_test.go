@@ -49,7 +49,11 @@ func TestTopPageLoadsRangesAndPlays(t *testing.T) {
 
 func TestExtraClosesOnPageChange(t *testing.T) {
 	f, m := playingModel(t)
-	f.on("GET me/player/recently-played", `{"items":[{"track":{"name":"Old","uri":"spotify:track:o"},"played_at":"`+time.Now().Add(-2*time.Hour).UTC().Format(time.RFC3339)+`"}]}`)
+	at := time.Now().Add(-2 * time.Hour)
+	if at.Day() != time.Now().Day() { // gece yarısından hemen sonra "Today" kalsın
+		at = time.Now()
+	}
+	f.on("GET me/player/recently-played", `{"items":[{"track":{"name":"Old","uri":"spotify:track:o"},"played_at":"`+at.UTC().Format(time.RFC3339)+`"}]}`)
 	m.page, m.focus = pageHome, focusContent
 	m = m.pressKey("g")
 	m = m.pressKey("r")

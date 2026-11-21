@@ -98,3 +98,14 @@ func TestTrackRoundTrip(t *testing.T) {
 		t.Fatalf("round trip = %s", out)
 	}
 }
+
+func TestClearQueued(t *testing.T) {
+	out, n := ClearQueued(rows("q1 q2 | c1 c2"))
+	if names(out) != "| c1 c2" || n != 2 {
+		t.Fatalf("got %q, %d", names(out), n)
+	}
+	out, n = ClearQueued(rows("c1 c2"))
+	if names(out) != "c1 c2" || n != 0 {
+		t.Fatalf("nothing queued: %q, %d", names(out), n)
+	}
+}

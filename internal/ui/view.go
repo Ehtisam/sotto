@@ -233,6 +233,8 @@ func (m Model) content(w, h int) string {
 	switch {
 	case m.wiz.on:
 		rows = m.wizardView(w)
+	case m.whatsnew.open:
+		rows = m.whatsNewView(w, h)
 	case m.form.on:
 		rows = m.playlistFormView(w)
 	case m.actions.open:
@@ -343,6 +345,10 @@ func (m Model) nowInfo(w, h int) []string {
 	}
 	if album != "" {
 		rows = append(rows, theme.Dim.Render(truncate(album, w)))
+	}
+
+	if q := m.streamQuality(); q != "" {
+		rows = append(rows, truncate(q, w))
 	}
 
 	switch {
@@ -734,4 +740,25 @@ func entityKind(t string) string {
 		return T("kind." + t)
 	}
 	return t
+}
+
+// streamQuality, Soloist'in çaldığı akış ("FLAC 44.1", "Vorbis 320"): yalnız
+// sotto'nun açtığı Soloist etkin cihazken (çıktısını o okuyor). Kayıpsız
+// istenip gelmiyorsa nasıl açılacağını da söyler.
+func (m Model) streamQuality() string {
+	if m.remote.active || !m.soloistLive() || !m.auth.IsActive || m.rt == nil || m.rt.proc == nil || m.state.Item == nil {
+		return ""
+	}
+	q := m.rt.proc.Quality()
+	label := q.Label()
+	if label == "" {
+		return ""
+	}
+	out := theme.Faint.Render(label)
+	if q.Lossless() {
+		out = theme.Playing.Render(label)
+	} else if m.cfg.Soloist.Quality == "lossless" {
+		out += theme.Faint.Render(T("now.lossy"))
+	}
+	return out
 }

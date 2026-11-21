@@ -180,3 +180,40 @@ func TestHistoryCommand(t *testing.T) {
 		t.Fatalf("bad range code %d", code)
 	}
 }
+
+func TestComplete(t *testing.T) {
+	for _, tc := range []struct {
+		before []string
+		cur    string
+		want   string
+	}{
+		{nil, "pl", "play playlist"},
+		{nil, "", "completion connect devices doctor help history like mute next pause play playlist prev queue repeat search seek setup shuffle status theme toggle unlike version vol"},
+		{[]string{"playlist"}, "d", "delete duplicate"},
+		{[]string{"playlists"}, "l", "list"},
+		{[]string{"playlist", "new", "x"}, "--p", "--public"},
+		{[]string{"search", "foo", "--type"}, "", "album artist episode playlist show track"},
+		{[]string{"search", "--type", "album", "foo"}, "--", "--json --limit --type"},
+		{[]string{"play", "daft"}, "", ""},
+		{[]string{"repeat"}, "", "context off track"},
+		{[]string{"repeat", "off"}, "", ""},
+		{nil, "--v", "--version"},
+	} {
+		if got := strings.Join(Complete(tc.before, tc.cur), " "); got != tc.want {
+			t.Errorf("%v %q: %q, want %q", tc.before, tc.cur, got, tc.want)
+		}
+	}
+}
+
+func TestCompletionScripts(t *testing.T) {
+	for _, sh := range []string{"powershell", "bash", "zsh", "fish"} {
+		var out, errb strings.Builder
+		if code := Completion([]string{sh}, &out, &errb); code != 0 || !strings.Contains(out.String(), "__complete") {
+			t.Errorf("%s: code %d, %q", sh, code, out.String())
+		}
+	}
+	var out, errb strings.Builder
+	if Completion([]string{"tcsh"}, &out, &errb) == 0 {
+		t.Error("unknown shell accepted")
+	}
+}

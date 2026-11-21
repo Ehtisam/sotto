@@ -13,7 +13,7 @@ import (
 // dosyayı yalnızca açılırken okur: değişiklik yeniden başlatınca geçerli olur.
 type Prefs struct {
 	CrossfadeS int    // 0: kapalı; 1–12 sn
-	Quality    string // "normal", "high" ya da "very_high"
+	Quality    string // "normal", "high", "very_high" ya da "lossless"
 	Normalize  bool   // ses düzeyini eşitle
 }
 
@@ -21,15 +21,18 @@ type Prefs struct {
 var CrossfadeSteps = []int{0, 3, 5, 8, 12}
 
 // Qualities, Ayarlar'da sırayla dolaşılan ses kaliteleri.
-var Qualities = []string{"normal", "high", "very_high"}
+var Qualities = []string{"normal", "high", "very_high", "lossless"}
 
-// qualityEnum: Spotify'ın kalite numaraları (4 = çok yüksek, 320 kbps; trill doğruladı).
+// qualityEnum: Spotify'ın kalite numaraları (4 = çok yüksek, 320 kbps, trill
+// doğruladı; 5 = kayıpsız FLAC, spotatui Soloist 1.3.10'da ölçtü).
 func qualityEnum(q string) int {
 	switch q {
 	case "normal":
 		return 2
 	case "high":
 		return 3
+	case "lossless":
+		return 5
 	}
 	return 4
 }
@@ -64,12 +67,14 @@ func writePrefsFile(path string, p Prefs) error {
 	}
 	cf := max(0, min(12, p.CrossfadeS))
 	q := qualityEnum(p.Quality)
-	// Soloist bu değerleri yalnız "migrated" işaretleri false iken okur.
+	// Geçiş değerlerini Soloist yalnız "migrated" işareti false iken okur
+	// (trill). Kalite için spotatui işareti true bırakıp ölçtü (5 → FLAC);
+	// Soloist de okuduktan sonra true'ya çeviriyor.
 	lines = append(lines,
 		"audio.crossfade_migrated_to_ps=false",
 		fmt.Sprintf("audio.crossfade_v2=%t", cf > 0),
 		fmt.Sprintf("audio.crossfade.time_v2=%d", max(1, cf)*1000),
-		"audio.play_bitrate_non_metered_migrated=false",
+		"audio.play_bitrate_non_metered_migrated=true",
 		fmt.Sprintf("audio.play_bitrate_non_metered_enumeration=%d", q),
 		fmt.Sprintf("audio.play_bitrate_enumeration=%d", q),
 		fmt.Sprintf("audio.normalize_v2=%t", p.Normalize),

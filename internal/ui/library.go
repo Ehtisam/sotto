@@ -245,6 +245,7 @@ func (m Model) updateLibrary(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.loadRootlist(), saved) // klasörler ve kitaplık sırası
 	case tracksPageMsg:
+		var recs []tea.Cmd
 		for _, tl := range m.openLists() {
 			if tl.receive(msg) {
 				if msg.err != nil {
@@ -257,11 +258,13 @@ func (m Model) updateLibrary(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd := m.continueLoadAll(tl); cmd != nil {
 					return m, cmd
 				}
+				recs = append(recs, m.maybeRecs(tl))
 			}
 		}
 		for _, t := range msg.tracks {
 			m.rt.known[t.URI] = t
 		}
+		return m, tea.Batch(recs...)
 	case playedMsg:
 		return m.played(msg)
 	}

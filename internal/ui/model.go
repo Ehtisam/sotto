@@ -115,6 +115,7 @@ type shared struct {
 	viz     vizState          // ses görselleştirmesi (viz.go)
 	hist    histRec           // dinleme kaydı (histrec.go)
 	smart   smartState        // akıllı karıştırma (smart.go)
+	hidden  map[string]bool   // gizlenen şarkılar (✱, hidden.go)
 	discord *discord.Presence // Discord'da "şu an dinliyor" (discord.go)
 	// privUntil: özel oturumun bittiği an (private.go; sıfır: kapalı).
 	privUntil time.Time
@@ -169,8 +170,9 @@ type Model struct {
 	set        settingsState
 	help       bool // ? ile açılan kısayol listesi
 	helpScroll int
-	helpFind   finder // ? listesinde / ile süzgeç (help.go)
-	vizFull    bool   // tam ekran görselleştirme (V, vizfull.go)
+	helpFind   finder   // ? listesinde / ile süzgeç (help.go)
+	vizFull    bool     // tam ekran görselleştirme (V, vizfull.go)
+	whatsnew   whatsNew // güncellemeden sonra bir kez (whatsnew.go)
 	wiz        wizardState
 	actions    actionMenu
 	lyr        lyricsState
@@ -246,7 +248,7 @@ func New(cfg config.Config) Model {
 	default:
 		m.spState = spLoggedOut
 	}
-	return m
+	return m.checkWhatsNew(appVersion())
 }
 
 // WithOutput, terminal çıktısını modele tanıtır (resim şeritleri için; main
@@ -587,7 +589,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case playlistsMsg, tracksPageMsg, playedMsg:
 		return m.updateLibrary(msg)
 
-	case devicesMsg, transferredMsg:
+	case devicesMsg, transferredMsg, devVolumeMsg, devVolumeDoneMsg:
 		return m.updateDevices(msg)
 
 	case searchFireMsg, searchResultMsg:
@@ -626,6 +628,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case plMovedMsg:
 		return m.updateListMove(msg)
+	case recsMsg, recAddedMsg:
+		return m.updateRecs(msg)
+	case hiddenMsg:
+		return m.updateHidden(msg)
 
 	case wizDownloadedMsg, wizBridgeMsg, wizBridgeRetryMsg:
 		return m.updateWizard(msg)
@@ -877,6 +883,14 @@ func (m Model) keyCanon(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 			return m, m.quit()
 		}
 		return m.wizardKey(msg)
+	}
+
+	// "Yenilikler" penceresi açıkken: kaydırma ya da kapatma.
+	if m.whatsnew.open {
+		if k == "ctrl+c" {
+			return m, m.quit()
+		}
+		return m.whatsNewKey(k), nil
 	}
 
 	// Liste formu açıkken tuşlar ona gider.

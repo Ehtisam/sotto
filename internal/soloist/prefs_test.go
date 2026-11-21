@@ -41,6 +41,16 @@ func TestWritePrefs(t *testing.T) {
 		t.Errorf("old managed lines not replaced:\n%s", got)
 	}
 
+	// Kayıpsız: 5.
+	if err := WritePrefs(data, Prefs{Quality: "lossless"}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "audio.play_bitrate_enumeration=5\n") ||
+		!strings.Contains(string(b), "audio.play_bitrate_non_metered_enumeration=5\n") ||
+		strings.Count(string(b), "audio.play_bitrate_non_metered_migrated=true") != 1 {
+		t.Errorf("lossless write wrong:\n%s", b)
+	}
+
 	// İkinci yazış: kapalı geçiş, çok yüksek kalite; satırlar çoğalmaz.
 	if err := WritePrefs(data, Prefs{CrossfadeS: 0, Quality: "very_high", Normalize: true}); err != nil {
 		t.Fatal(err)

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -30,6 +31,22 @@ type deviceList struct {
 	// transferredMsg ya da hata gelince biter); şeritte ve başlıkta görünür.
 	switching string
 	switchAt  time.Time
+
+	// volSeq: cihaz sesi için basışlar toplanır, son basıştan 300 ms sonra
+	// tek istek gider (devVolumeMsg aynı sıra numarasını taşıyorsa).
+	volSeq int
+}
+
+type devVolumeMsg struct {
+	seq      int
+	id, name string
+	soloist  bool
+	vol      int
+}
+
+type devVolumeDoneMsg struct {
+	name string
+	err  error
 }
 
 // switchTimeout: geçiş bu sürede bitmezse "geçiliyor" yazısı kalkar.
@@ -102,6 +119,8 @@ type deviceRow struct {
 	active     bool
 	soloist    bool
 	off        bool
+	vol        int  // -1: bilinmiyor
+	fixedVol   bool // sesi uzaktan değiştirilemez
 }
 
 func (m Model) deviceRows() []deviceRow {
@@ -109,14 +128,18 @@ func (m Model) deviceRows() []deviceRow {
 	own := m.cfg.Soloist.DeviceName
 	seenOwn := false
 	for _, d := range m.devs.items {
-		r := deviceRow{name: d.Name, kind: strings.ToLower(d.Type), id: d.ID, active: d.IsActive}
+		r := deviceRow{name: d.Name, kind: strings.ToLower(d.Type), id: d.ID, active: d.IsActive, vol: -1}
+		if d.Volume != nil {
+			r.vol = *d.Volume
+		}
+		r.fixedVol = d.SupportsVolume != nil && !*d.SupportsVolume
 		if d.Name == own {
 			r.soloist, seenOwn = true, true
 		}
 		rows = append(rows, r)
 	}
 	if !seenOwn {
-		rows = append([]deviceRow{{name: own, soloist: true, off: !m.soloistLive()}}, rows...)
+		rows = append([]deviceRow{{name: own, soloist: true, off: !m.soloistLive(), vol: -1}}, rows...)
 	}
 	return rows
 }
@@ -153,23 +176,44 @@ func (m Model) transfer(id, name string) tea.Cmd {
 func (m Model) transferByName(name string) tea.Cmd { return m.transferByNamePlay(name, true) }
 
 // transferByNamePlay: play false ise müzik duraklatılmış olarak gelir.
+// Soloist yeniden açıldıktan hemen sonra Spotify listede eski kaydı tutabiliyor;
+// ona aktarma 500/404 döner. Bu yüzden yeni kayıt gelene dek yeniden denenir.
 func (m Model) transferByNamePlay(name string, play bool) tea.Cmd {
 	sp := m.sp
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		for try := 0; try < 6; try++ {
+		var last error = errNotListed
+		for try := 0; try < 8; try++ {
 			if ds, err := sp.Devices(ctx); err == nil {
 				for _, d := range ds {
 					if d.Name == name {
-						return transferredMsg{name, sp.Transfer(ctx, d.ID, play)}
+						last = sp.Transfer(ctx, d.ID, play)
+						if last == nil || !transferRetryable(last) {
+							return transferredMsg{name, last}
+						}
+						break
 					}
 				}
 			}
-			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return transferredMsg{name, last}
+			case <-time.After(time.Second):
+			}
 		}
-		return transferredMsg{name, errNotListed}
+		return transferredMsg{name, last}
 	}
+}
+
+// transferRetryable: cihaz henüz hazır değil (Spotify'ın geçici hataları).
+func transferRetryable(err error) bool {
+	for _, code := range []int{404, 500, 502, 503} {
+		if spotify.IsStatus(err, code) {
+			return true
+		}
+	}
+	return false
 }
 
 type notListedErr struct{}
@@ -291,6 +335,18 @@ func (m Model) updateDevices(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.pick.cursor = max(0, min(len(m.deviceRows())-1, m.pick.cursor))
 		}
+	case devVolumeMsg:
+		return m, m.sendDeviceVolume(msg)
+	case devVolumeDoneMsg:
+		switch {
+		case msg.err == nil:
+			return m, nil
+		case spotify.IsStatus(msg.err, 403), spotify.IsStatus(msg.err, 404):
+			m = m.say(F("flash.novolume", msg.name))
+		default:
+			m = m.say(msg.err.Error())
+		}
+		return m, m.loadDevices() // gerçek değer geri gelsin
 	case transferredMsg:
 		m.devs.switching = ""
 		if msg.err != nil {
@@ -332,10 +388,74 @@ func (m Model) devicesKey(k string) (Model, tea.Cmd, bool) {
 	case "R":
 		m.devs.loading = true
 		return m, m.loadDevices(), true
+	case "+", "=", "-":
+		if len(rows) == 0 {
+			return m, nil, true
+		}
+		d := 5
+		if k == "-" {
+			d = -5
+		}
+		mm, cmd := m.deviceVolume(rows[m.devs.cursor], d)
+		return mm, cmd, true
 	default:
 		return m, nil, false
 	}
 	return m, nil, true
+}
+
+// deviceVolume, seçili cihazın sesini d kadar değiştirir: satır hemen
+// güncellenir, istek basışlar durunca gider. Çalan cihazda genel sesle aynı.
+func (m Model) deviceVolume(r deviceRow, d int) (Model, tea.Cmd) {
+	if r.soloist && r.off {
+		return m.say(T("flash.nosoloist")), nil
+	}
+	if r.fixedVol {
+		return m.say(F("flash.novolume", r.name)), nil
+	}
+	if r.id == "" && !r.soloist {
+		return m, nil
+	}
+	cur := r.vol
+	if r.active || cur < 0 {
+		cur = m.state.Volume
+	}
+	v := max(0, min(100, cur+d))
+	for i := range m.devs.items {
+		if m.devs.items[i].ID == r.id || (r.soloist && m.devs.items[i].Name == r.name) {
+			m.devs.items[i].Volume = &v
+		}
+	}
+	if r.active {
+		m.state.Volume = v // şerit de hemen göstersin
+	}
+	m.devs.volSeq++
+	msg := devVolumeMsg{seq: m.devs.volSeq, id: r.id, name: r.name, soloist: r.soloist && m.rt.client != nil, vol: v}
+	return m, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg { return msg })
+}
+
+// sendDeviceVolume: Soloist'e kendi API'sinden, öbürlerine Web API'den.
+func (m Model) sendDeviceVolume(msg devVolumeMsg) tea.Cmd {
+	if msg.seq != m.devs.volSeq {
+		return nil // arkadan yeni basış geldi
+	}
+	if msg.soloist {
+		c := m.rt.client
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return devVolumeDoneMsg{name: msg.name, err: c.SetVolume(ctx, msg.vol)}
+		}
+	}
+	if m.spState != spReady {
+		return nil
+	}
+	sp := m.sp
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return devVolumeDoneMsg{name: msg.name, err: sp.SetDeviceVolume(ctx, msg.id, msg.vol)}
+	}
 }
 
 func (m Model) devicesView(w int) []string {
@@ -362,6 +482,12 @@ func (m Model) devicesView(w int) []string {
 			kind = T("dev.kind.off")
 		case r.soloist:
 			kind = T("dev.kind.light")
+		}
+		switch {
+		case r.fixedVol && !r.off:
+			kind += "  " + T("dev.fixedvol") // Spotify bu cihazın sesini uzaktan değiştirtmiyor
+		case r.vol >= 0 && !r.off:
+			kind += "  " + fmt.Sprintf("%3d%%", r.vol)
 		}
 		rows = append(rows, mark+row(r.name, kind, w-2, active && i == m.devs.cursor))
 	}

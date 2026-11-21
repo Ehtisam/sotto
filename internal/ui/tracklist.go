@@ -70,6 +70,8 @@ type trackList struct {
 	ver      int // şarkılar değişince artar (görünüm önbelleği için)
 	cache    []int
 	cacheKey viewKey
+
+	recs listRecs // listenin altında önerilenler (recs.go)
 }
 
 const pageSize = 50
@@ -213,6 +215,9 @@ func fitScroll(cursor, scroll, n, h int) (int, int) {
 
 // listKey, açık bir listedeyken tuşlar. back=true: kullanıcı listeden çıktı.
 func (m Model) listKey(tl *trackList, k string) (cmd tea.Cmd, handled, back bool) {
+	if cmd, ok := m.recsKey(tl, k); ok {
+		return cmd, true, false
+	}
 	h := m.listHeight()
 	move := func(d int) {
 		n := tl.rows()
@@ -262,7 +267,7 @@ func (m Model) listKey(tl *trackList, k string) (cmd tea.Cmd, handled, back bool
 		tl.loading = true
 		return m.loadTracks(tl.entry, len(tl.tracks)), true, false
 	}
-	return nil, true, false
+	return m.maybeRecs(tl), true, false
 }
 
 // ---- çalma ----
@@ -290,7 +295,8 @@ func (m Model) playContext(contextURI, startURI string) tea.Cmd {
 	})
 }
 
-// playOn, çalma isteğini Soloist açıksa ona, değilse o an etkin olan cihaza gönderir.
+// playOn, çalma isteğini o an çalan cihaza gönderir (müzik telefondaysa
+// telefonda kalır). Hiçbir cihaz etkin değilse Soloist açıksa ona gider.
 func (m Model) playOn(f func(ctx context.Context, sp *spotify.Client, deviceID string) error) tea.Cmd {
 	sp := m.sp
 	device := ""
@@ -300,19 +306,32 @@ func (m Model) playOn(f func(ctx context.Context, sp *spotify.Client, deviceID s
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		id, elsewhere := "", ""
-		if ds, err := sp.Devices(ctx); err == nil {
-			for _, d := range ds {
-				if device != "" && d.Name == device {
-					id = d.ID
-				}
-				if device == "" && d.IsActive {
-					elsewhere = d.Name
-				}
-			}
-		}
+		id, elsewhere := playTarget(ctx, sp, device)
 		return playedMsg{err: f(ctx, sp, id), elsewhere: elsewhere}
 	}
+}
+
+// playTarget: çalan cihaz varsa onun kimliği; yoksa Soloist'inki (soloist
+// boşsa Soloist kapalı). elsewhere, Soloist kapalıyken müziğin çalacağı cihaz.
+func playTarget(ctx context.Context, sp *spotify.Client, soloist string) (id, elsewhere string) {
+	ds, err := sp.Devices(ctx)
+	if err != nil {
+		return "", ""
+	}
+	for _, d := range ds {
+		if d.IsActive {
+			if soloist == "" {
+				elsewhere = d.Name
+			}
+			return d.ID, elsewhere
+		}
+	}
+	for _, d := range ds {
+		if soloist != "" && d.Name == soloist {
+			return d.ID, ""
+		}
+	}
+	return "", ""
 }
 
 func (m Model) played(msg playedMsg) (Model, tea.Cmd) {
@@ -391,15 +410,31 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 	if n == 0 && tl.find.query != "" {
 		rows = append(rows, theme.Dim.Render(T("find.none")))
 	}
-	end := min(n, tl.scroll+m.listHeight())
+	// İmleç son şarkıda ya da önerilerdeyse liste kısalır: son şarkılar ve
+	// öneriler birlikte görünür.
+	lh, scroll := m.listHeight(), tl.scroll
+	if r := tl.recs; n > 0 && m.recsWanted(tl) && (r.in || tl.pos() == n-1) {
+		need := 0
+		switch r.state {
+		case recsReady:
+			need = 2 + len(r.tracks)
+		case recsLoading:
+			need = 2
+		}
+		if need > 0 && n-scroll+need > lh {
+			lh = max(1, lh-min(need, lh-2))
+			scroll = max(0, n-lh)
+		}
+	}
+	end := min(n, scroll+lh)
 	cur := tl.pos()
 	numW := 5 // "123  "; numaralar kapalıyken yalnızca ♪ için iki sütun
 	if m.cfg.Look.LineNumbers == "off" {
 		numW = 2
 	}
-	barW := scrollbarW(n, m.listHeight())
+	barW := scrollbarW(n, lh)
 	listStart := len(rows)
-	for p := tl.scroll; p < end; p++ {
+	for p := scroll; p < end; p++ {
 		i := tl.at(p)
 		t := tl.tracks[i]
 		var num string
@@ -423,11 +458,19 @@ func (m Model) listView(tl *trackList, w int, active bool) []string {
 		default:
 			right = t.ArtistNames() + "  " + right
 		}
-		rows = append(rows, num+row(t.Name, right, w-numW-barW, active && i == tl.cursor))
+		sel := active && i == tl.cursor && !tl.recs.in
+		if m.isHidden(t.URI) {
+			rows = append(rows, num+hiddenRow(t.Name, right, w-numW-barW, sel))
+		} else {
+			rows = append(rows, num+row(t.Name, right, w-numW-barW, sel))
+		}
 	}
-	rows = withScrollbar(rows, listStart, n, tl.scroll, m.listHeight(), w)
+	rows = withScrollbar(rows, listStart, n, scroll, lh, w)
 	if tl.loading && len(tl.tracks) > 0 && end == n {
 		rows = append(rows, theme.Faint.Render("     "+T("lib.loading")))
+	}
+	if end == n {
+		rows = append(rows, m.recsRows(tl, w, m.listHeight()-(end-scroll), active)...)
 	}
 	return rows
 }

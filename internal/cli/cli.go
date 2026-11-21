@@ -32,6 +32,7 @@ var Remote = map[string]bool{
 var commands = map[string]bool{
 	"search": true, "devices": true, "queue": true, "playlist": true,
 	"doctor": true, "help": true, "version": true, "theme": true, "history": true,
+	"completion": true, "__complete": true,
 }
 
 // IsCommand, ilk argüman bir komut mu (değilse arayüz açılır).
@@ -48,6 +49,10 @@ var Version = "0.1.0"
 
 // Main, komutu çalıştırır ve çıkış kodunu döner.
 func Main(cfg config.Config, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+	// Tamamlama, sözcükleri olduğu gibi alır (--json dahil).
+	if len(args) > 0 && args[0] == "__complete" {
+		return completeMain(args[1:], stdout)
+	}
 	asJSON := false
 	var rest []string
 	for _, a := range args {
@@ -81,6 +86,8 @@ func Main(cfg config.Config, args []string, stdout, stderr io.Writer, stdin io.R
 		return Theme(cfg, cargs, stdout, stderr)
 	case "history":
 		return History(cfg, cargs, stdout, stderr, asJSON)
+	case "completion":
+		return Completion(cargs, stdout, stderr)
 	}
 	if !IsCommand(cmd) {
 		fmt.Fprintf(stderr, "sotto: unknown command %q (sotto help lists them)\n", cmd)
@@ -232,5 +239,9 @@ Library:
                             what you listened to while sotto was open, with
                             the most played songs and artists (--json too)
   sotto doctor              check the setup
+  sotto completion powershell|bash|zsh|fish
+                            print a tab-completion script; for PowerShell add
+                            sotto completion powershell | Out-String | Invoke-Expression
+                            to your profile (notepad $PROFILE)
   --json                    machine-readable output for any command
 `

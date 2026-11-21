@@ -460,20 +460,23 @@ func (m Model) extraView(w int) []string {
 		return append(rows, theme.Dim.Render(T("extra.empty")))
 	}
 	if x.page == extraLog {
-		end := min(len(x.items), x.scroll+m.extraHeight())
+		lh := m.extraHeight()
+		bw := w - scrollbarW(len(x.items), lh)
+		top := len(rows)
+		end := min(len(x.items), x.scroll+lh)
 		for i := x.scroll; i < end; i++ {
 			it := x.items[i]
 			text := theme.Plain
 			if it.kind == "logerr" {
 				text = theme.Error
 			}
-			line := theme.Faint.Render(it.sub+"  ") + text.Render(truncate(it.name, w-10))
+			line := theme.Faint.Render(it.sub+"  ") + text.Render(truncate(it.name, bw-10))
 			if active && i == x.cursor {
-				line = theme.SelectedRow.Width(w).Render(truncate(it.sub+"  "+it.name, w))
+				line = theme.SelectedRow.Width(bw).Render(truncate(it.sub+"  "+it.name, bw))
 			}
 			rows = append(rows, line)
 		}
-		return rows
+		return withScrollbar(rows, top, len(x.items), x.scroll, lh, w)
 	}
 	return append(rows, m.itemRowsH(x.items, x.cursor, x.scroll, w, m.extraHeight(), active)...)
 }

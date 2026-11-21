@@ -62,3 +62,16 @@ func Move(next []Track, i, d int) (out []Track, ok bool) {
 	out[i], out[j] = out[j], out[i]
 	return out, true
 }
+
+// ClearQueued, kullanıcının sıraya eklediklerini çıkarır; listeden/albümden
+// gelenler ve işaret satırları kalır. Kaç şarkı çıktığını da döner.
+func ClearQueued(next []Track) ([]Track, int) {
+	out := make([]Track, 0, len(next))
+	for _, t := range next {
+		if !t.Delimiter() && t.Queued() {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out, len(next) - len(out)
+}

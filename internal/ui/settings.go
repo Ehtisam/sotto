@@ -262,9 +262,6 @@ func (m Model) settingValue(id settingID) string {
 	case setStartMenu:
 		return onOff(c.Desktop.StartMenu)
 	case setDiscord:
-		if c.Desktop.Discord && strings.TrimSpace(c.Desktop.DiscordAppID) == "" {
-			return T("set.discord.noid")
-		}
 		return onOff(c.Desktop.Discord)
 	case setExtras:
 		return onOff(c.Extras.Enabled)
@@ -444,9 +441,6 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 			return m.say(err.Error()), nil
 		}
 		m.syncDiscord()
-		if c.Desktop.Discord && strings.TrimSpace(c.Desktop.DiscordAppID) == "" {
-			return m.say(T("set.discord.howid")), nil
-		}
 		return m.note(T("set.saved")), nil
 	case setStartMenu:
 		c.Desktop.StartMenu = !c.Desktop.StartMenu
@@ -561,6 +555,7 @@ func (m Model) settingsView(w, h int) []string {
 		}
 		return false
 	}
+	at := map[int]settingID{} // rows'taki ayar satırları
 	for i, r := range settingRows {
 		if r.id >= 0 && !visible[r.id] {
 			continue
@@ -575,29 +570,40 @@ func (m Model) settingsView(w, h int) []string {
 			rows, ends = append(rows, theme.Dim.Italic(true).Render(T(r.section))), append(ends, false)
 			continue
 		}
-		value := m.settingValue(r.id)
-		selected := active && r.id == sel
-		if selected && r.id != setAccount && r.id != setConfigFile && r.id != setSoloist {
-			value = "‹ " + value + " ›"
-		}
-		line := "  " + row(T("set.name."+settingNames[r.id]), value, w-8, selected)
-		if sw := m.settingSwatch(r.id); sw != "" {
-			line += "  " + sw
-		}
-		rows, ends = append(rows, line), append(ends, true)
+		at[len(rows)] = r.id // satır, genişlik belli olunca aşağıda çizilir
+		rows, ends = append(rows, ""), append(ends, true)
 	}
 	// Seçili ayarın kısa açıklaması.
 	var help []string
 	if key := "set.help." + settingNames[sel]; sel >= 0 && T(key) != key {
 		help = []string{"", theme.Faint.Render(truncate(T(key), w))}
 	}
+	room := h - len(help) - 3
+	scrolls := h > 0 && len(rows)-3 > room && room > 2
+	// Ayar satırları: "  " + ad ··· değer + "  ■■■" (renk örneği). Kaydırılıyorsa
+	// sağdaki çubuğa da yer kalsın; örnek kırpılmasın.
+	rw := w - 8
+	if scrolls {
+		rw = w - 9 - 2 // 2: kaydırma çubuğu ve önündeki boşluk
+	}
+	for i, id := range at {
+		value := m.settingValue(id)
+		selected := active && id == sel
+		if selected && id != setAccount && id != setConfigFile && id != setSoloist {
+			value = "‹ " + value + " ›"
+		}
+		line := "  " + row(T("set.name."+settingNames[id]), value, rw, selected)
+		if sw := m.settingSwatch(id); sw != "" {
+			line += "  " + sw
+		}
+		rows[i] = line
+	}
 	// Pencereye sığmıyorsa seçili satır görünecek kadar kaydır (başlık kalır).
-	if room := h - len(help) - 3; h > 0 && len(rows)-3 > room && room > 2 {
+	if scrolls {
 		selRow := 0
-		for i, r := range rows[3:] {
-			if strings.Contains(r, T("set.name."+settingNames[sel])) {
-				selRow = i
-				break
+		for i, id := range at {
+			if id == sel {
+				selRow = i - 3
 			}
 		}
 		body, isSet := rows[3:], ends[3:]
@@ -612,6 +618,10 @@ func (m Model) settingsView(w, h int) []string {
 			start++
 		}
 		rows = append(rows[:3:3], body[start:end]...)
+		for len(rows) < 3+room { // çubuk bütün yükseklikte dursun
+			rows = append(rows, "")
+		}
+		rows = withScrollbar(rows, 3, len(body), start, room, w)
 	}
 	return append(rows, help...)
 }

@@ -45,6 +45,9 @@ func withScrollbar(rows []string, start, n, scroll, h, w int) []string {
 	shown := min(h, len(rows)-start)
 	for i := 0; i < shown; i++ {
 		r := rows[start+i]
+		if lipgloss.Width(r) > w-2 {
+			r = truncate(r, w-2) // çubuk taşmasın
+		}
 		pad := w - 2 - lipgloss.Width(r)
 		if pad < 0 {
 			pad = 0

@@ -9,19 +9,19 @@ import (
 
 // Discord'da "şu an dinliyor" ([desktop] discord, discord_app_id): çalan
 // şarkı, sanatçı, kapak ve kalan süre Discord profilinde görünür; durunca
-// temizlenir. Discord geliştirici sitesinde oluşturulan bir uygulamanın
-// kimliği gerekir; uygulamanın adı "Listening to …" yazısında görünür.
+// temizlenir. Kimlik verilmemişse sotto'nun kendi Discord uygulaması
+// kullanılır ("Listening to sotto").
 
-// discordReady: ayar açık ve kimlik var.
+// discordReady: ayar açık.
 func (m Model) discordReady() bool {
-	return m.cfg.Desktop.Discord && strings.TrimSpace(m.cfg.Desktop.DiscordAppID) != ""
+	return m.cfg.Desktop.Discord
 }
 
 // syncDiscord, ayara göre bağlantıyı açar ya da kapatır.
 func (m Model) syncDiscord() {
 	switch {
 	case m.discordReady() && m.rt.discord == nil:
-		p := discord.Start(strings.TrimSpace(m.cfg.Desktop.DiscordAppID))
+		p := discord.Start(m.cfg.Desktop.DiscordID())
 		logs := m.rt.logs
 		p.Err = func(err error) { logs.add(logError, err.Error(), time.Now()) }
 		m.rt.discord = p

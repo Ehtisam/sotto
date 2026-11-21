@@ -232,6 +232,9 @@ func (m Model) queueKey(k string) (Model, tea.Cmd, bool) {
 	case "J":
 		mm, cmd := m.editQueue(1)
 		return mm, cmd, true
+	case "C":
+		mm, cmd := m.clearQueue()
+		return mm, cmd, true
 	case "R":
 		m.refreshNow()
 		m.home.fetched = time.Time{}

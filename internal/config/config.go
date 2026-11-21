@@ -87,9 +87,22 @@ type Desktop struct {
 	// StartMenu: Başlat menüsünde kısayol (Windows medya kartında ve
 	// bildirimlerde "sotto" adı ve simgesi için gerekli).
 	StartMenu bool `toml:"start_menu"`
-	// Discord'da "şu an dinliyor"; kimlik Discord geliştirici sitesindeki uygulamanın.
+	// Discord'da "şu an dinliyor". DiscordAppID boşsa sotto'nun kendi
+	// Discord uygulaması (DefaultDiscordAppID) kullanılır.
 	Discord      bool   `toml:"discord"`
 	DiscordAppID string `toml:"discord_app_id"`
+}
+
+// DefaultDiscordAppID: discord.com/developers'daki "sotto" uygulaması
+// (profilde "Listening to sotto" ve sotto simgesi). Herkese açık bir numara.
+const DefaultDiscordAppID = "1573809415608467519"
+
+// DiscordID, kullanılacak Discord uygulama kimliği.
+func (d Desktop) DiscordID() string {
+	if id := strings.TrimSpace(d.DiscordAppID); id != "" {
+		return id
+	}
+	return DefaultDiscordAppID
 }
 
 // Hooks: olaylarda çalıştırılan komutlar.
@@ -104,7 +117,7 @@ type Soloist struct {
 	// duraklatılmış yükle), "play" (kaldığın yerden çal) ya da "off".
 	OnStart    string `toml:"on_start"`
 	Crossfade  int    `toml:"crossfade"` // şarkılar arası geçiş, sn (0: kapalı)
-	Quality    string `toml:"quality"`   // normal, high ya da very_high
+	Quality    string `toml:"quality"`   // normal, high, very_high ya da lossless
 	Normalize  bool   `toml:"normalize"` // ses düzeyini eşitle
 	AutoUpdate bool   `toml:"auto_update"`
 
@@ -133,7 +146,7 @@ func (s *Soloist) normalize() {
 		s.OnStart = "paused"
 	}
 	switch s.Quality {
-	case "normal", "high", "very_high":
+	case "normal", "high", "very_high", "lossless":
 	default:
 		s.Quality = "very_high"
 	}
@@ -348,7 +361,8 @@ on_start = %s
 # on the Settings page restarts Soloist for you.
 # Crossfade between songs in seconds, 0 to 12 (0 is off).
 crossfade = %d
-# Sound quality: "normal" (96 kbps), "high" (160) or "very_high" (320).
+# Sound quality: "normal" (96 kbps), "high" (160), "very_high" (320) or
+# "lossless" (FLAC, where your plan and country have Spotify lossless).
 quality = %s
 # Keep every song at about the same loudness.
 normalize = %t
@@ -384,9 +398,9 @@ media_controls = %t
 # "Unknown app".
 start_menu = %t
 # Show what you're listening to on your Discord profile (Discord must be open).
-# It needs the Application ID of an app made at
-# https://discord.com/developers/applications; its name shows as
-# "Listening to <name>".
+# It shows as "Listening to sotto". To use your own app instead, put the
+# Application ID of an app made at https://discord.com/developers/applications
+# in discord_app_id; its name then shows as "Listening to <name>".
 discord = %t
 discord_app_id = %s
 

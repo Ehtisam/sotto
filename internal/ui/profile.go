@@ -609,27 +609,22 @@ func (m Model) profilePanel(title string, items []searchItem, cursor, scroll, w,
 	if len(items) == 0 {
 		lines = append(lines, theme.Faint.Render(truncate("  "+T("prof.none"), w)))
 	} else {
-		show := h
-		if len(items) > h && h > 1 {
-			show = h - 1 // son satır "↓ n daha" için
-		}
-		cursor, scroll = fitScroll(cursor, scroll, len(items), show)
+		cursor, scroll = fitScroll(cursor, scroll, len(items), h)
+		bw := w - scrollbarW(len(items), h)
 		playing := ""
 		if m.state.Item != nil {
 			playing = m.state.Item.URI
 		}
-		end := min(len(items), scroll+show)
+		end := min(len(items), scroll+h)
 		for i := scroll; i < end; i++ {
 			it := items[i]
 			mark := "  "
 			if it.uri != "" && it.uri == playing {
 				mark = theme.Playing.Render(theme.Icon.Note + " ")
 			}
-			lines = append(lines, mark+row(it.name, it.sub, w-2, active && i == cursor))
+			lines = append(lines, mark+row(it.name, it.sub, bw-2, active && i == cursor))
 		}
-		if rest := len(items) - end; rest > 0 && show < h {
-			lines = append(lines, theme.Faint.Render(F("prof.more", rest)))
-		}
+		lines = withScrollbar(lines, 1, len(items), scroll, h, w)
 	}
 	return lipgloss.NewStyle().Width(w).Height(h + 1).MaxHeight(h + 1).Render(strings.Join(lines, "\n"))
 }

@@ -401,7 +401,11 @@ func (m Model) itemRowsH(items []searchItem, cursor, scroll, w, h int, active bo
 		if it.uri != "" && (it.uri == playing || it.uri == playingCtx) {
 			mark = theme.Playing.Render(theme.Icon.Note + " ")
 		}
-		rows = append(rows, mark+row(it.name, it.sub, w-2, active && i == cursor))
+		if it.kind == "track" && m.isHidden(it.uri) {
+			rows = append(rows, mark+hiddenRow(it.name, it.sub, w-2, active && i == cursor))
+		} else {
+			rows = append(rows, mark+row(it.name, it.sub, w-2, active && i == cursor))
+		}
 	}
 	return withScrollbar(rows, 0, len(items), scroll, h, full)
 }

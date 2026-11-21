@@ -45,6 +45,7 @@ type Options struct {
 type Process struct {
 	cmd     *exec.Cmd
 	logFile *os.File
+	sink    *logSink
 	done    chan struct{}
 	waitErr error
 
@@ -114,13 +115,15 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 		"--data-dir", o.DataDir,
 		"--cache-dir", o.CacheDir,
 		"--ws", "127.0.0.1:0",
+		"-v", // çalınan akışın codec/bit hızı satırları yalnız ayrıntılı günlükte
 	}
 	if o.InitialVolume > 0 {
 		args = append(args, "--initial-volume", fmt.Sprint(o.InitialVolume))
 	}
 	cmd := exec.Command(o.Path, args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	sink := &logSink{file: logFile}
+	cmd.Stdout = sink
+	cmd.Stderr = sink
 	proc.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
@@ -129,7 +132,7 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 
 	_ = proc.BindToParent(cmd.Process.Pid) // olmazsa da sotto kapanırken Stop ile kapatılır
 
-	p := &Process{cmd: cmd, logFile: logFile, done: make(chan struct{})}
+	p := &Process{cmd: cmd, logFile: logFile, sink: sink, done: make(chan struct{})}
 	go func() {
 		p.waitErr = cmd.Wait()
 		logFile.Close()
@@ -176,6 +179,15 @@ func waitForAddr(ctx context.Context, dataDir string, done <-chan struct{}) (str
 		case <-tick.C:
 		}
 	}
+}
+
+// Quality, Soloist'in çaldığı son akış. Başka bir pencerenin Soloist'ine
+// bağlanıldıysa çıktısı okunamaz, boş döner.
+func (p *Process) Quality() StreamQuality {
+	if p == nil || p.sink == nil {
+		return StreamQuality{}
+	}
+	return p.sink.Quality()
 }
 
 // Done, süreç bitince kapanır.

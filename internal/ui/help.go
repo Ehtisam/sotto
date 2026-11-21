@@ -174,9 +174,11 @@ func (m Model) helpView(w, h int) []string {
 	}
 	lines := m.helpLinesAll(w)
 	room := max(h-len(head), 1)
-	sc := max(0, min(m.helpScroll, len(lines)-room))
 	if len(lines) > room {
-		return append(head, lines[sc:min(len(lines), sc+room)]...)
+		lines = m.helpLinesAll(w - 2) // sağda kaydırma çubuğuna yer
+		sc := max(0, min(m.helpScroll, len(lines)-room))
+		rows := append(head, lines[sc:min(len(lines), sc+room)]...)
+		return withScrollbar(rows, len(head), len(lines), sc, room, w)
 	}
 	return append(head, lines...)
 }

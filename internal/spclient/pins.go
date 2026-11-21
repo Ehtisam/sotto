@@ -41,7 +41,7 @@ func collectionSet(ctx context.Context, token, user, set string) ([]Pin, error) 
 			body = pbString(body, 3, page)
 		}
 		body = pbVarint(body, 4, 2000)
-		resp, err := postProto(ctx, token, "/collection/v2/paging", "application/vnd.collection-v2.spotify.proto", body)
+		resp, err := postProto(ctx, token, "/collection/v2/paging", collectionType, body)
 		if err != nil {
 			return nil, err
 		}

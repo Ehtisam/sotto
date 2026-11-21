@@ -37,6 +37,9 @@ const (
 	actMoveFolder
 	actShuffle
 	actInfo
+	actClearQueue
+	actHide
+	actUnhide
 )
 
 type menuItem struct {
@@ -205,9 +208,20 @@ func (m Model) menuItems() []menuItem {
 		}
 		if m.cfg.Extras.Enabled {
 			add(actRadio, "g", "act.radio")
+			if m.isHidden(t.uri) {
+				add(actUnhide, "h", "act.unhide")
+			} else {
+				add(actHide, "h", "act.hide")
+			}
+		}
+		if m.queueClearable() {
+			add(actClearQueue, "C", "act.clearqueue")
 		}
 	case "episode":
 		add(actQueue, "q", "act.queue")
+		if m.queueClearable() {
+			add(actClearQueue, "C", "act.clearqueue")
+		}
 	case "album", "playlist", "show", "liked":
 		add(actOpen, "o", "act.open")
 		add(actPlay, "p", "act.play")
@@ -413,6 +427,12 @@ func (m Model) runAction(id actID) (Model, tea.Cmd) {
 	case actArtist:
 		a := t.track.Artists[0]
 		return m, openArtistCmd(a.URI, a.Name)
+	case actHide, actUnhide:
+		m.actions = actionMenu{}
+		return m.setHidden(uri, t.name, id == actHide)
+	case actClearQueue:
+		m.actions = actionMenu{}
+		return m.clearQueue()
 	case actInfo:
 		mm, cmd := m.openInfoFor(t, from)
 		return mm, cmd
@@ -537,16 +557,19 @@ func (m Model) actionsView(w int) []string {
 	if a.picking {
 		rows := []string{theme.Title.Render(T("act.addlist.title")), theme.Dim.Render(truncate(a.target.name, w)), "", ""}
 		// İlk satır: yeni liste aç ve şarkıyı içine koy.
-		end := min(len(a.lists)+1, a.plScroll+m.listHeight())
+		lh, n := m.listHeight(), len(a.lists)+1
+		bw := w - scrollbarW(n, lh)
+		top := len(rows)
+		end := min(n, a.plScroll+lh)
 		for i := a.plScroll; i < end; i++ {
 			if i == 0 {
-				rows = append(rows, "  "+row("＋ "+T("act.newlist"), "", w-2, a.plCursor == 0))
+				rows = append(rows, "  "+row("＋ "+T("act.newlist"), "", bw-2, a.plCursor == 0))
 				continue
 			}
 			e := a.lists[i-1]
-			rows = append(rows, "  "+row(e.name, F("lib.songs", e.total), w-2, i == a.plCursor))
+			rows = append(rows, "  "+row(e.name, F("lib.songs", e.total), bw-2, i == a.plCursor))
 		}
-		return rows
+		return withScrollbar(rows, top, n, a.plScroll, lh, w)
 	}
 	sub := a.target.sub
 	if sub == "" {

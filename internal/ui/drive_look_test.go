@@ -17,6 +17,12 @@ import (
 // (kaçış dizileri, fare dizileri), ama Spotify yerine sahte bir sunucu ve
 // geçici ayar klasörü. Hesaba dokunmaz, istek sınırını harcamaz; her zaman çalışır.
 
+// driveBeforeNew: bir test, model kurulmadan önce geçici klasöre dosya koyabilsin.
+var driveBeforeNew func(dir string)
+
+// driveCfg: bir test, ayarları model kurulmadan önce değiştirebilsin.
+var driveCfg func(cfg *config.Config)
+
 func driveOffline(t *testing.T) (*driver, *fakeWeb) {
 	t.Helper()
 	f, _ := newFakeWeb(t)
@@ -37,6 +43,12 @@ func driveOffline(t *testing.T) (*driver, *fakeWeb) {
 		Look: config.Look{Theme: "cardo", Covers: "off", LineNumbers: "absolute", Mouse: true}}
 	if err := spotify.WriteTokenForTest(cfg.TokenFile()); err != nil {
 		t.Fatal(err)
+	}
+	if driveBeforeNew != nil {
+		driveBeforeNew(dir)
+	}
+	if driveCfg != nil {
+		driveCfg(&cfg)
 	}
 	r, w := io.Pipe()
 	d := &driver{t: t, in: w, done: make(chan struct{}), sync: make(chan int, 16)}

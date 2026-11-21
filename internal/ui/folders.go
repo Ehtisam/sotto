@@ -34,6 +34,9 @@ type rootlistMsg struct {
 	err    error
 	pins   []string // sabitlenenler (✱, en son sabitlenen önce); okunduysa pinsRead
 	pinsOK bool
+
+	hidden   []string // gizlenen şarkılar (✱, hidden.go)
+	hiddenOK bool
 }
 
 var errFolderSelf = errors.New("folder into itself")
@@ -79,6 +82,9 @@ func (m Model) rootEdit(build func(r spclient.Rootlist) ([]spclient.Op, error), 
 							msg.pins = append(msg.pins, p.URI)
 						}
 						msg.pinsOK = true
+					}
+					if hs, err := spclient.Hidden(ctx, tok, user); err == nil {
+						msg.hidden, msg.hiddenOK = hs, true
 					}
 					return nil
 				}
@@ -129,6 +135,12 @@ func (m Model) updateRootlist(msg rootlistMsg) (Model, tea.Cmd) {
 	}
 	if msg.pinsOK {
 		m.lib.pins = msg.pins
+	}
+	if msg.hiddenOK {
+		m.rt.hidden = make(map[string]bool, len(msg.hidden))
+		for _, u := range msg.hidden {
+			m.rt.hidden[u] = true
+		}
 	}
 	if m.lib.folder != "" {
 		if _, ok := m.lib.root.FolderByID(m.lib.folder); !ok {
@@ -417,16 +429,19 @@ func (m Model) folderChoices(e libEntry) []folderChoice {
 func (m Model) folderPickView(w int) []string {
 	a := m.actions
 	rows := []string{theme.Title.Render(T("act.movefolder.title")), theme.Dim.Render(truncate(a.target.name, w)), "", ""}
-	end := min(len(a.folders), a.plScroll+m.listHeight())
+	lh := m.listHeight()
+	bw := w - scrollbarW(len(a.folders), lh)
+	top := len(rows)
+	end := min(len(a.folders), a.plScroll+lh)
 	for i := a.plScroll; i < end; i++ {
 		c := a.folders[i]
 		name := strings.Repeat("  ", max(c.depth-1, 0)) + theme.Icon.Folder + " " + c.name
 		if c.id == "" {
 			name = c.name
 		}
-		rows = append(rows, "  "+row(name, "", w-2, i == a.plCursor))
+		rows = append(rows, "  "+row(name, "", bw-2, i == a.plCursor))
 	}
-	return rows
+	return withScrollbar(rows, top, len(a.folders), a.plScroll, lh, w)
 }
 
 // folderTitle, Kitaplık başlığında bulunulan klasörün yolu.
