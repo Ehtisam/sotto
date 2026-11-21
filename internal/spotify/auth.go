@@ -37,6 +37,7 @@ var scopes = []string{
 	"playlist-read-private", "playlist-read-collaborative",
 	"playlist-modify-private", "playlist-modify-public", "ugc-image-upload",
 	"user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing",
+	"user-read-playback-position", // podcast bölümünde kaldığın yer (ayrıntılar)
 }
 
 // Token, Spotify'dan alınan erişim ve yenileme jetonu.

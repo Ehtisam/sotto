@@ -99,6 +99,9 @@ func (m Model) deviceStatus() string {
 	if m.remote.active && m.remote.device != "" {
 		return theme.Playing.Render(theme.Icon.Note+" ") + theme.Plain.Render(m.remote.device) + theme.Dim.Render(T("dev.remote"))
 	}
+	if s := m.switchingText(); s != "" {
+		return theme.GoldText.Render(s)
+	}
 	switch m.engine {
 	case engineOff:
 		return theme.Dim.Render(T("dev.off"))
@@ -435,7 +438,9 @@ func (m Model) strip(w int) string {
 		line1 = icon + "  " + m.stripLine()
 	}
 	right := ""
-	if m.flash != "" {
+	if s := m.switchingText(); s != "" && (m.flash == "" || m.flashInfo) {
+		right = theme.GoldText.Render(truncate(s, inner*2/3)) // hata notu öne geçer
+	} else if m.flash != "" {
 		style := theme.Error
 		if m.flashInfo {
 			style = theme.GoldText
@@ -556,13 +561,21 @@ func (m Model) hints(w int) string {
 			if m.cfg.Extras.Enabled {
 				hs = append(hs, hint{"f", T("folder.hint")})
 			}
+		case m.extraOn() && m.extra.open == nil && (m.extra.page == extraArtist || m.extra.page == extraNews || m.extra.page == extraPeople):
+			hs = append(hs, hint{"tab", T("hint.section")})
 		case m.page == pageProfile && m.prof.open == nil:
 			hs = append(hs, hint{"tab", T("hint.nextlist")})
+			if m.cfg.Extras.Enabled {
+				hs = append(hs, hint{"f", T("hint.people")})
+			}
 		case m.page == pageSettings:
 			hs = []hint{{"↑ ↓", T("hint.select")}, {"← →", T("hint.change")}}
 		}
 		if m.shownFinder() != nil {
 			hs = append(hs, hint{"/", T("find.hint")}, hint{"⇧O", T("sort.hint")})
+		}
+		if m.page != pageSettings {
+			hs = append(hs, hint{m.kn("info"), T("hint.info")})
 		}
 		hs = append(hs, hint{"esc", T("hint.back")}, hint{"1–8", T("hint.pages")})
 	} else {

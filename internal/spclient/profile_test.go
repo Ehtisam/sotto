@@ -13,7 +13,7 @@ func TestProfileDecode(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Followers != 6 || p.Following != 12 || p.Total != 2 || len(p.Playlists) != 2 || p.Playlists[0].Name != "A" {
+	if p.Followers != 6 || p.FollowingN != 12 || p.Total != 2 || len(p.Playlists) != 2 || p.Playlists[0].Name != "A" {
 		t.Fatalf("decoded %+v", p)
 	}
 }

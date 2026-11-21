@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+
+	"github.com/Ehtisam/sotto/internal/i18n"
 )
 
 // base, iç uçların adresi (testler değiştirir).
@@ -72,6 +74,7 @@ func getJSON(ctx context.Context, token, path string, out any) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Language", i18n.Lang()) // sanatçı sayfasındaki yazılar
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

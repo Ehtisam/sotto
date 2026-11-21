@@ -27,16 +27,19 @@ type ProfilePlaylist struct {
 
 // Profile, kullanıcının profil sayfasında görünenler.
 type Profile struct {
-	Followers int               `json:"followers_count"`
-	Following int               `json:"following_count"` // kişiler ve sanatçılar
-	Total     int               `json:"total_public_playlists_count"`
-	Playlists []ProfilePlaylist `json:"public_playlists"`
+	Name       string            `json:"name"`
+	Image      string            `json:"image_url"`
+	Following  bool              `json:"is_following"` // kullanıcı bu profili takip ediyor
+	Followers  int               `json:"followers_count"`
+	FollowingN int               `json:"following_count"` // kişiler ve sanatçılar
+	Total      int               `json:"total_public_playlists_count"`
+	Playlists  []ProfilePlaylist `json:"public_playlists"`
 }
 
 // ProfileView, kullanıcının profilini getirir: profilde gösterilen listeler
 // (herkese açık olmak profilde görünmek demek değil) ve sayılar.
 func ProfileView(ctx context.Context, token, userID string) (Profile, error) {
-	u := "https://spclient.wg.spotify.com/user-profile-view/v3/profile/" + url.PathEscape(userID) +
+	u := base + "/user-profile-view/v3/profile/" + url.PathEscape(userID) +
 		"?playlist_limit=200&artist_limit=0&episode_limit=0&market=from_token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

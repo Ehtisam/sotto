@@ -409,6 +409,9 @@ func (m Model) profileKey(k string) (Model, tea.Cmd, bool) {
 			p.open = tl
 		}
 		return m, cmd, true
+	case "f": // takipçiler, takip edilenler, arkadaşlar (✱)
+		mm, cmd := m.openPeople("", "", pplFollowers)
+		return mm.(Model), cmd, true
 	case "e":
 		if m.me.ID == "" {
 			return m, nil, true

@@ -57,7 +57,7 @@ func TestHomeSections(t *testing.T) {
 		kinds = append(kinds, it.kind)
 	}
 	// başlık, liste, albüm, beğenilenler, başlık, 4 farklı şarkı, "hepsini gör"
-	want := []string{"header", "playlist", "album", "liked", "space", "header", "track", "track", "track", "track", "more"}
+	want := []string{"header", "playlist", "album", "liked", "space", "header", "more", "space", "header", "track", "track", "track", "track", "more"}
 	if len(kinds) != len(want) {
 		t.Fatalf("kinds = %v", kinds)
 	}
@@ -73,8 +73,8 @@ func TestHomeSections(t *testing.T) {
 		t.Fatalf("cursor = %d, want first selectable row", m.home.cursor)
 	}
 	// Son çalınan şarkı, çalındığı listede başlatılır; beğenilenler bağlam sayılmaz.
-	if m.home.items[6].ctx != "spotify:playlist:pl" || m.home.items[8].ctx != "" {
-		t.Fatalf("track contexts: %q %q", m.home.items[6].ctx, m.home.items[8].ctx)
+	if m.home.items[9].ctx != "spotify:playlist:pl" || m.home.items[11].ctx != "" {
+		t.Fatalf("track contexts: %q %q", m.home.items[9].ctx, m.home.items[11].ctx)
 	}
 }
 

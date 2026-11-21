@@ -74,8 +74,15 @@ func (m Model) toggleLike() (Model, tea.Cmd) {
 	if !ok || it.uri == "" {
 		return m.note(T("act.nothing")), nil
 	}
+	if it.kind == "people" { // profil sayfasındaki sayılar: o kullanıcıyı takip et
+		name := ""
+		if u := m.extra.user; u != nil {
+			name = u.name
+		}
+		it = searchItem{kind: "user", uri: it.uri, name: name}
+	}
 	switch it.kind {
-	case "liked", kindFolder:
+	case "liked", kindFolder, "text", "more":
 		return m.note(T("like.cannot")), nil
 	case "playlist":
 		if m.ownList(it.entry) {
@@ -104,7 +111,7 @@ func likeNote(kind string, on bool, name string) string {
 		if on {
 			key = "act.liked"
 		}
-	case kind == "playlist" || kind == "artist":
+	case kind == "playlist" || kind == "artist" || kind == "user":
 		key = "act.unfollowed"
 		if on {
 			key = "act.followed"

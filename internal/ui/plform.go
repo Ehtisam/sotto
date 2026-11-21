@@ -328,7 +328,7 @@ func (m Model) applyDetails(key string, d spotify.PlaylistDetails) Model {
 		apply(&entries[i])
 	}
 	m.lib.entries = entries
-	for _, tl := range []*trackList{m.lib.open, m.search.open, m.home.open, m.prof.open} {
+	for _, tl := range m.openLists() {
 		if tl != nil {
 			apply(&tl.entry)
 		}

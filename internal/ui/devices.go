@@ -23,6 +23,51 @@ type deviceList struct {
 	cursor   int
 	pending  string // Soloist açılınca müziği ona aktar
 	switchTo string // kumandaya dönerken kullanılacak son cihaz
+
+	// switching: müzik bu cihaza geçiriliyor (tuşa basıldığı an başlar,
+	// transferredMsg ya da hata gelince biter); şeritte ve başlıkta görünür.
+	switching string
+	switchAt  time.Time
+}
+
+// switchTimeout: geçiş bu sürede bitmezse "geçiliyor" yazısı kalkar.
+const switchTimeout = 20 * time.Second
+
+// beginSwitch, geçişin başladığını hemen gösterir (Spotify 1–2 sn sürüyor).
+func (m Model) beginSwitch(name string) Model {
+	if name == "" {
+		name = T("dev.other")
+	}
+	m.devs.switching, m.devs.switchAt = name, m.now
+	return m.note(F("flash.switching", name))
+}
+
+// deviceName, cihaz kimliğinin bilinen adı.
+func (m Model) deviceName(id string) string {
+	for _, d := range m.devs.items {
+		if d.ID == id {
+			return d.Name
+		}
+	}
+	return ""
+}
+
+// switchSpinner, geçiş sürerken dönen işaret (tick 500 ms).
+func (m Model) switchSpinner() string {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	if theme.Icon.Play == ">" { // ascii simgeler
+		frames = []string{"|", "/", "-", "\\"}
+	}
+	n := int(m.now.Sub(m.devs.switchAt) / (500 * time.Millisecond))
+	return frames[(n%len(frames)+len(frames))%len(frames)]
+}
+
+// switchingText: "⠋ Soloist'e geçiliyor…" (geçiş yoksa boş).
+func (m Model) switchingText() string {
+	if m.devs.switching == "" {
+		return ""
+	}
+	return m.switchSpinner() + " " + F("strip.switching", m.devs.switching)
 }
 
 type devicesMsg struct {
@@ -131,6 +176,7 @@ var errNotListed error = notListedErr{}
 // startSoloistAndUse, Soloist'i açar ve hazır olunca müziği ona aktarır.
 func (m Model) startSoloistAndUse() (Model, tea.Cmd) {
 	m.devs.pending = m.cfg.Soloist.DeviceName
+	m = m.beginSwitch(m.cfg.Soloist.DeviceName)
 	if m.engine == engineStarting {
 		return m, nil
 	}
@@ -148,7 +194,8 @@ func (m Model) stopSoloist() (Model, tea.Cmd) {
 	m.engine, m.engineErr = engineOff, nil
 	m.auth, m.haveAuth = soloist.AuthState{}, false
 	m.state, m.queue = soloist.PlaybackState{}, soloist.QueueChanged{}
-	m.devs.pending = ""
+	m.devs.pending, m.devs.switching = "", ""
+	m = m.note(T("flash.soloist.stopped"))
 	return m, func() tea.Msg {
 		if c != nil {
 			c.Close()
@@ -166,7 +213,7 @@ func (m Model) toggleSoloist() (Model, tea.Cmd) {
 	case engineOff, engineFailed:
 		return m.startSoloistAndUse()
 	case engineStarting:
-		return m, nil
+		return m.note(F("flash.switching", m.cfg.Soloist.DeviceName)), nil // basıldı, sürüyor
 	}
 	return m.stopSoloist()
 }
@@ -182,10 +229,11 @@ func (m Model) switchSpeaker() (Model, tea.Cmd) {
 			m.page, m.focus = pageDevices, focusContent
 			return m.note(T("flash.pickdevice")), m.loadDevices()
 		}
-		return m, m.transfer(m.devs.switchTo, "")
+		name := m.deviceName(m.devs.switchTo)
+		return m.beginSwitch(name), m.transfer(m.devs.switchTo, name)
 	}
 	if m.soloistLive() {
-		return m, m.transferByName(m.auth.DeviceName)
+		return m.beginSwitch(m.auth.DeviceName), m.transferByName(m.auth.DeviceName)
 	}
 	return m.startSoloistAndUse()
 }
@@ -201,6 +249,7 @@ func (m Model) updateDevices(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.devs.items, m.devs.err = msg.items, nil
 		m.devs.cursor = max(0, min(len(m.deviceRows())-1, m.devs.cursor))
 	case transferredMsg:
+		m.devs.switching = ""
 		if msg.err != nil {
 			if spotify.IsStatus(msg.err, 404) {
 				return m.say(T("flash.nodevice")), nil
@@ -234,7 +283,7 @@ func (m Model) devicesKey(k string) (Model, tea.Cmd, bool) {
 		if r.id == "" {
 			return m, nil, true
 		}
-		return m, m.transfer(r.id, r.name), true
+		return m.beginSwitch(r.name), m.transfer(r.id, r.name), true
 	case "esc", "left", "backspace":
 		m.focus = focusMenu
 	case "R":

@@ -161,6 +161,10 @@ func (m Model) runCommand(action string) (tea.Model, tea.Cmd) {
 		return m.openExtra(extraRecent)
 	case "go_log":
 		return m.openExtra(extraLog)
+	case "go_news":
+		return m.openNews()
+	case "go_people":
+		return m.openPeople("", "", pplFollowers)
 	}
 	return m, nil
 }

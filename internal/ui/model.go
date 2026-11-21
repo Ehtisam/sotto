@@ -467,12 +467,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.rt.gfx.drawn = nil // Bubble Tea boyut değişince ekranı baştan çizer
 		m.clampLib()
+		if m.extraOn() {
+			m.rebuildExtra() // sarılmış yazılar yeni genişliğe
+		}
 		return m, m.afterResize()
 
 	case tickMsg:
 		m.now = time.Time(msg)
 		if m.flash != "" && m.now.Sub(m.flashAt) > 5*time.Second {
 			m.flash = ""
+		}
+		if m.devs.switching != "" && m.now.Sub(m.devs.switchAt) > switchTimeout {
+			m.devs.switching = ""
 		}
 		var cmd, dcmd, qcmd, scmd, vcmd tea.Cmd
 		m, vcmd = m.vizTick()
@@ -497,6 +503,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engineErrMsg:
 		m.engine, m.engineErr = engineFailed, msg.err
+		m.devs.switching, m.devs.pending = "", ""
 		return m, m.readSoloistBuild()
 
 	case engineDownMsg:
@@ -614,6 +621,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case extraTopMsg, extraRecentMsg:
 		return m.updateExtra(msg)
+
+	case openArtistMsg, artistViewMsg, artistAlbumsMsg:
+		return m.updateArtist(msg)
+	case infoMsg:
+		return m.updateInfo(msg)
+	case newsMsg:
+		return m.updateNews(msg)
+	case peopleMsg, userMsg, openUserMsg:
+		return m.updatePeople(msg)
+	case openPeopleMsg:
+		return m.openPeople(msg.user, msg.name, msg.section)
+	case savedLibMsg:
+		return m.updateSavedLib(msg)
 
 	case seqTimeoutMsg, countTimeoutMsg:
 		return m.updateKeyTimeout(msg)
@@ -916,6 +936,8 @@ func (m Model) keyCanon(msg tea.KeyPressMsg, k string) (tea.Model, tea.Cmd) {
 	case "?":
 		m.help, m.helpScroll = true, 0
 		return m, nil
+	case "i":
+		return m.openInfo()
 	case "/":
 		m.page, m.focus = pageSearch, focusContent
 		m.search.open = nil

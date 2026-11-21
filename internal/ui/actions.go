@@ -36,6 +36,7 @@ const (
 	actRenameFolder
 	actMoveFolder
 	actShuffle
+	actInfo
 )
 
 type menuItem struct {
@@ -232,17 +233,27 @@ func (m Model) menuItems() []menuItem {
 			save("act.save", "act.unsave")
 		}
 	case "artist":
+		if t.act != "play" {
+			add(actOpen, "o", "act.artistpage")
+		}
 		add(actPlay, "p", "act.play")
 		add(actShuffle, "S", "act.shuffle")
 		if m.cfg.Extras.Enabled {
 			add(actRadio, "g", "act.radio.artist")
 		}
 		save("act.follow", "act.unfollow")
+	case "user":
+		add(actOpen, "o", "act.userpage")
+		save("act.follow", "act.unfollow")
 	case kindFolder:
 		add(actOpenFolder, "o", "act.open")
 		add(actRenameFolder, "e", "act.renamefolder")
 		add(actMoveFolder, "m", "act.movefolder")
 		add(actDelete, "d", "act.delfolder")
+	}
+	switch t.kind {
+	case "track", "episode", "album", "playlist", "show", "artist":
+		add(actInfo, "i", "act.info")
 	}
 	if t.uri != "" && t.kind != "liked" && t.kind != kindFolder {
 		add(actLink, "c", "act.link")
@@ -400,7 +411,11 @@ func (m Model) runAction(id actID) (Model, tea.Cmd) {
 			image: pickImage(a.Images), album: a}
 		return m.goTo(e)
 	case actArtist:
-		return m, m.playContext(t.track.Artists[0].URI, "")
+		a := t.track.Artists[0]
+		return m, openArtistCmd(a.URI, a.Name)
+	case actInfo:
+		mm, cmd := m.openInfoFor(t, from)
+		return mm, cmd
 	case actPlay:
 		if t.kind == "liked" {
 			tl, cmd := m.openList(t.entry)
@@ -408,6 +423,12 @@ func (m Model) runAction(id actID) (Model, tea.Cmd) {
 		}
 		return m, m.playContext(uri, "")
 	case actOpen:
+		switch t.kind {
+		case "artist":
+			return m, openArtistCmd(t.uri, plainName(t.name))
+		case "user":
+			return m, openUserCmd(t.uri, t.name)
+		}
 		return m.goTo(t.entry)
 	case actLink:
 		return m.note(T("act.copied")), tea.SetClipboard(spotify.WebLink(uri))

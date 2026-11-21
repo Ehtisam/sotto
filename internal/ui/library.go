@@ -3,7 +3,6 @@ package ui
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,6 +28,12 @@ type library struct {
 	root   *spclient.Rootlist // kitaplığın sırası ve klasörleri (✱, folders.go)
 	folder string             // "Hepsi"nde içinde bulunulan klasör ("" kök)
 
+	// Kayıtlı albümler, sanatçılar, podcast'ler (library_saved.go).
+	saved        []libEntry
+	savedLoaded  bool
+	savedLoading bool
+	savedErr     error
+
 	find   finder // sayfa içi arama: bütün listelerde (klasörlerin içi dahil)
 	sortBy string // sort.go; "" kendi sırası (klasörlerle)
 	desc   bool
@@ -43,10 +48,14 @@ const (
 	libPublic              // senin, herkese açık listelerin
 	libOnProfile           // profilinde görünenler (✱)
 	libFollowed            // başkalarının, takip ettiğin listeler
+	libAlbums              // kitaplıktaki albümler
+	libArtists             // takip edilen sanatçılar
+	libPodcasts            // kitaplıktaki podcast'ler
 	libFilterCount
 )
 
-var libFilterKeys = [libFilterCount]string{"lib.f.all", "lib.f.mine", "lib.f.public", "lib.f.profile", "lib.f.followed"}
+var libFilterKeys = [libFilterCount]string{"lib.f.all", "lib.f.mine", "lib.f.public", "lib.f.profile", "lib.f.followed",
+	"lib.f.albums", "lib.f.artists", "lib.f.podcasts"}
 
 // libFilters, gösterilecek süzgeçler: iç yol kapalıysa "Profilinde" yok.
 func (m Model) libFilters() []libFilter {
@@ -54,7 +63,7 @@ func (m Model) libFilters() []libFilter {
 	if m.cfg.Extras.Enabled {
 		out = append(out, libOnProfile)
 	}
-	return append(out, libFollowed)
+	return append(out, libFollowed, libAlbums, libArtists, libPodcasts)
 }
 
 func (m Model) mine(e libEntry) bool {
@@ -72,6 +81,8 @@ func (m Model) inFilter(e libEntry, f libFilter) bool {
 		return m.onProfile(e)
 	case libFollowed:
 		return e.kind == kindPlaylist && !m.mine(e)
+	case libAlbums, libArtists, libPodcasts:
+		return e.kind == savedKind(f)
 	}
 	return true
 }
@@ -93,9 +104,12 @@ func (m Model) onProfile(e libEntry) bool {
 func (m Model) libVisible() []libEntry {
 	vis := m.libFiltered()
 	if m.lib.sortBy != sortCustom {
-		pos := make(map[string]int, len(m.lib.entries))
+		pos := make(map[string]int, len(m.lib.entries)+len(m.lib.saved))
 		for i, e := range m.lib.entries {
 			pos[e.key] = i
+		}
+		for i, e := range m.lib.saved {
+			pos[e.key] = len(m.lib.entries) + i
 		}
 		vis = sortEntries(vis, m.lib.sortBy, m.lib.desc, pos)
 	}
@@ -113,14 +127,21 @@ func (m Model) libVisible() []libEntry {
 // libFiltered, süzgece uyan girişler. Sayfa içi arama açıkken klasörlerin
 // içindekiler de (düz liste olarak).
 func (m Model) libFiltered() []libEntry {
+	if k := savedKind(m.lib.filter); k != "" {
+		return m.savedOf(k)
+	}
 	if m.lib.filter == libAll && m.lib.find.query != "" {
-		return m.lib.entries
+		return append(append([]libEntry(nil), m.lib.entries...), m.lib.saved...)
 	}
 	if m.lib.filter == libAll {
 		if m.foldersOn() {
-			return m.levelEntries(m.lib.folder)
+			out := m.levelEntries(m.lib.folder)
+			if m.lib.folder == "" { // kayıtlı albüm/sanatçı/podcast kökte, listelerin ardından
+				out = append(append([]libEntry(nil), out...), m.lib.saved...)
+			}
+			return out
 		}
-		return m.lib.entries
+		return append(append([]libEntry(nil), m.lib.entries...), m.lib.saved...)
 	}
 	var out []libEntry
 	for _, e := range m.lib.entries {
@@ -215,9 +236,14 @@ func (m Model) updateLibrary(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.home.fetched.IsZero() {
 			m.rebuildHome() // liste adları artık biliniyor
 		}
-		return m, m.loadRootlist() // klasörler ve kitaplık sırası
+		var saved tea.Cmd
+		if !m.lib.savedLoaded && !m.lib.savedLoading {
+			m.lib.savedLoading = true
+			saved = m.loadSaved()
+		}
+		return m, tea.Batch(m.loadRootlist(), saved) // klasörler ve kitaplık sırası
 	case tracksPageMsg:
-		for _, tl := range []*trackList{m.lib.open, m.search.open, m.home.open, m.prof.open} {
+		for _, tl := range m.openLists() {
 			if tl.receive(msg) {
 				if msg.err != nil {
 					return m.spotifyFailed(msg.err), nil
@@ -308,6 +334,8 @@ func (m Model) libraryKey(k string) (Model, tea.Cmd, bool) {
 		}
 		if e := vis[min(l.cursor, len(vis)-1)]; e.kind == kindFolder {
 			return m.enterFolder(e.key), nil, true
+		} else if e.kind == kindArtist {
+			return m, openArtistCmd(e.uri, e.name), true
 		}
 		tl, cmd := m.openList(vis[min(l.cursor, len(vis)-1)])
 		l.open = tl
@@ -323,6 +351,10 @@ func (m Model) libraryKey(k string) (Model, tea.Cmd, bool) {
 		}
 		m.actions = actionMenu{open: true, target: entryItem(e), confirm: true, saved: -1}
 		return m, nil, true
+	case "R":
+		m.refreshNow()
+		l.loading, l.savedLoading, l.savedLoaded = true, true, false
+		return m, tea.Batch(m.loadLibrary(), m.loadSaved()), true
 	case "f":
 		if !m.foldersOn() {
 			return m.say(T("folder.extras")), nil, true
@@ -398,14 +430,32 @@ func (m Model) libraryView(w, h int) []string {
 	sub := theme.Dim.Render(T("lib.loading"))
 	if l.loaded {
 		sub = theme.Dim.Render(F("lib.playlists", len(l.entries)-1)) + theme.Faint.Render(T("lib.plus.liked"))
+		if l.savedLoaded {
+			for _, c := range []struct {
+				kind, one, many string
+			}{{kindAlbum, "lib.n.album", "lib.n.albums"}, {kindArtist, "lib.n.artist", "lib.n.artists"}, {kindShow, "lib.n.podcast", "lib.n.podcasts"}} {
+				switch n := len(m.savedOf(c.kind)); n {
+				case 0:
+				case 1:
+					sub += theme.Faint.Render(" · " + T(c.one))
+				default:
+					sub += theme.Faint.Render(" · " + F(c.many, n))
+				}
+			}
+		}
 	} else if l.err != nil {
 		sub = theme.Error.Render(l.err.Error())
 	}
 
 	// Süzgeçler: her birinin yanında kaç liste olduğu.
-	var chips []string
-	for _, f := range m.libFilters() {
-		label := T(libFilterKeys[f])
+	var names, counts []string
+	sel := 0
+	for i, f := range m.libFilters() {
+		names = append(names, T(libFilterKeys[f]))
+		count := ""
+		if f == l.filter {
+			sel = i
+		}
 		if f != libAll && l.loaded && (f != libOnProfile || m.prof.view != nil) {
 			n := 0
 			for _, e := range l.entries {
@@ -413,23 +463,27 @@ func (m Model) libraryView(w, h int) []string {
 					n++
 				}
 			}
-			label += " " + fmt.Sprint(n)
+			if k := savedKind(f); k != "" {
+				n = len(m.savedOf(k))
+			}
+			if savedKind(f) == "" || l.savedLoaded {
+				count = fmt.Sprint(n)
+			}
 		}
-		if f == l.filter {
-			chips = append(chips, theme.Hi.Underline(true).Render(label))
-		} else {
-			chips = append(chips, theme.Dim.Render(label))
-		}
+		counts = append(counts, count)
 	}
 	sub += theme.Faint.Render(sortLabel(l.sortBy, l.desc))
-	rows := []string{title, sub, strings.Join(chips, theme.Faint.Render(" · ")), findBar(l.find, len(m.libVisible()), len(l.entries), w)}
+	rows := []string{title, sub, chipLine(names, counts, sel, w), findBar(l.find, len(m.libVisible()), len(l.entries), w)}
 
 	vis := m.libVisible()
 	if l.loaded && len(vis) == 0 {
 		if l.find.query != "" {
 			return append(rows, theme.Dim.Render(T("find.none")))
 		}
-		if l.filter == libOnProfile && m.prof.view == nil {
+		if l.filter == libOnProfile && m.prof.view == nil || savedKind(l.filter) != "" && !l.savedLoaded {
+			if l.savedErr != nil && savedKind(l.filter) != "" {
+				return append(rows, theme.Error.Render(l.savedErr.Error()))
+			}
 			return append(rows, theme.Dim.Render(T("lib.loading")))
 		}
 		return append(rows, theme.Dim.Render(T("lib.f.none")))
@@ -450,6 +504,8 @@ func (m Model) libraryView(w, h int) []string {
 		case e.kind == kindFolder:
 			name = theme.Icon.Folder + " " + name
 			info = folderInfo(e.total)
+		case e.kind == kindAlbum || e.kind == kindArtist || e.kind == kindShow:
+			info = savedInfo(e)
 		case e.kind == kindPlaylist && m.mine(e) && m.onProfile(e):
 			info = T("lib.onprofile") + " · " + info // profilde olan zaten herkese açık
 		case e.kind == kindPlaylist && e.public && m.mine(e):

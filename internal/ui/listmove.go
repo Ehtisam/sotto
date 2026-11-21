@@ -45,7 +45,7 @@ func (m Model) moveInList(tl *trackList, d int) tea.Cmd {
 
 func (m Model) updateListMove(msg plMovedMsg) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	for _, tl := range []*trackList{m.lib.open, m.search.open, m.home.open, m.prof.open} {
+	for _, tl := range m.openLists() {
 		if tl == nil || tl.entry.key != msg.key {
 			continue
 		}

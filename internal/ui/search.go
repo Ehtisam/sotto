@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ehtisam/sotto/internal/cli"
 	"github.com/Ehtisam/sotto/internal/spotify"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
 )
@@ -48,6 +49,11 @@ type searchItem struct {
 	// history: bağlam Spotify'ın son çalınanlar kaydından geliyor; güvenilmez
 	// (otomatik devamda çalınan şarkılar da listenin adıyla kaydediliyor).
 	history bool
+	// queue: şarkı bu adreslerle birlikte çalınır (sanatçının popüler şarkıları).
+	queue []string
+	// act "play": enter açmak yerine çalar (sanatçının "çal" satırı,
+	// Spotify'ın kendi listeleri: Web API onları okuyamıyor).
+	act string
 }
 
 type searchState struct {
@@ -134,6 +140,9 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		s.err = nil
 		items := searchItems(msg.res, msg.filter)
+		if msg.offset == 0 && msg.filter == filterAll {
+			items = withTopResult(items, msg.query)
+		}
 		if msg.offset == 0 {
 			s.items, s.cursor, s.scroll = items, 0, 0
 		} else {
@@ -250,7 +259,9 @@ func artistNames(as []spotify.Artist) string {
 }
 
 // selectable: bölüm başlıkları ve aradaki boş satırlar seçilemez.
-func (it searchItem) selectable() bool { return it.kind != "header" && it.kind != "space" }
+func (it searchItem) selectable() bool {
+	return it.kind != "header" && it.kind != "space" && it.kind != "text"
+}
 
 // nextSelectable, başlıkları atlayarak seçilebilir bir satır bulur.
 func nextSelectable(items []searchItem, i, dir int) int {
@@ -274,8 +285,14 @@ func nextSelectable(items []searchItem, i, dir int) int {
 // actOn, bir satırda enter: şarkıyı ya da sanatçıyı çalar, albümü,
 // listeyi ya da podcast'i açar (açılan liste döner).
 func (m Model) actOn(it searchItem) (*trackList, tea.Cmd) {
+	if it.act == "play" {
+		return nil, m.playContext(it.uri, "")
+	}
 	switch it.kind {
 	case "track":
+		if len(it.queue) > 0 {
+			return nil, m.playQueue(it.queue, it.uri)
+		}
 		album := ""
 		if it.track != nil {
 			album = it.track.Album.URI
@@ -294,7 +311,19 @@ func (m Model) actOn(it searchItem) (*trackList, tea.Cmd) {
 	case "album", "playlist", "show", "liked":
 		return m.openList(it.entry)
 	case "artist":
-		return nil, m.playContext(it.uri, "")
+		return nil, openArtistCmd(it.uri, plainName(it.name))
+	case "user":
+		return nil, openUserCmd(it.uri, it.name)
+	case "people": // bir kullanıcının takipçileri / takip ettikleri
+		sec := pplFollowers
+		if it.section == "following" {
+			sec = pplFollowing
+		}
+		user, name := strings.TrimPrefix(it.uri, "spotify:user:"), ""
+		if u := m.extra.user; u != nil {
+			name = u.name
+		}
+		return nil, func() tea.Msg { return openPeopleMsg{user, name, sec} }
 	case "episode":
 		return nil, m.playOne(it.uri)
 	}
@@ -357,6 +386,13 @@ func (m Model) itemRowsH(items []searchItem, cursor, scroll, w, h int, active bo
 			continue
 		case "space":
 			rows = append(rows, "")
+			continue
+		case "text": // düz yazı ya da "ad ···· değer"
+			if it.sub == "" {
+				rows = append(rows, "  "+theme.Plain.Render(truncate(it.name, w-2)))
+			} else {
+				rows = append(rows, "  "+row(it.name, it.sub, w-2, false))
+			}
 			continue
 		}
 		mark := "  "
@@ -563,4 +599,59 @@ func (m Model) searchView(w int) []string {
 	}
 
 	return append(rows, m.itemRows(s.items, s.cursor, s.scroll, w, active && !s.typing)...)
+}
+
+// withTopResult, "Hepsi" sonuçlarının başına "En iyi sonuç"u koyar: adı
+// sorguyla tam ya da baştan eşleşen ilk sanatçı, şarkı, albüm, liste ya da
+// podcast; hiçbiri eşleşmiyorsa ilk şarkı. Web API en iyi sonucu vermiyor;
+// Spotify uygulaması da sanatçıyı öne alıyor.
+func withTopResult(items []searchItem, query string) []searchItem {
+	q := cli.Fold(strings.TrimSpace(query))
+	if q == "" {
+		return items
+	}
+	order := map[string]int{"artist": 0, "track": 1, "album": 2, "playlist": 3, "show": 4}
+	firstOf := map[string]int{}
+	for i, it := range items {
+		if _, ok := order[it.kind]; ok {
+			if _, seen := firstOf[it.kind]; !seen {
+				firstOf[it.kind] = i
+			}
+		}
+	}
+	score := func(it searchItem) int {
+		n := cli.Fold(it.name)
+		switch {
+		case n == q:
+			return 3
+		case strings.HasPrefix(n, q):
+			return 2
+		case strings.Contains(n, q):
+			return 1
+		}
+		return 0
+	}
+	best, bestScore, bestOrder := -1, 0, 99
+	for kind, i := range firstOf {
+		s := score(items[i])
+		if s > bestScore || s == bestScore && s > 0 && order[kind] < bestOrder {
+			best, bestScore, bestOrder = i, s, order[kind]
+		}
+	}
+	if best < 0 {
+		i, ok := firstOf["track"]
+		if !ok {
+			return items
+		}
+		best = i
+	}
+	top := items[best]
+	kindLabel := T("kind." + top.kind)
+	if top.sub != "" && top.kind != "artist" {
+		top.sub = kindLabel + " · " + top.sub
+	} else {
+		top.sub = kindLabel
+	}
+	out := []searchItem{{kind: "header", section: "search.top"}, top, {kind: "space"}}
+	return append(out, items...)
 }

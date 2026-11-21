@@ -57,6 +57,8 @@ var Catalog = []Action{
 	{"go_top", []string{"g t"}, "", "help.g.top", "pages"},
 	{"go_recent", []string{"g r"}, "", "help.g.recent", "pages"},
 	{"go_log", []string{"g o"}, "", "help.g.log", "pages"},
+	{"go_news", []string{"g w"}, "", "help.g.news", "pages"},
+	{"go_people", []string{"g f"}, "", "help.g.people", "pages"},
 	{"search", []string{"/"}, "/", "help.search", "pages"},
 
 	// çalma
@@ -81,6 +83,7 @@ var Catalog = []Action{
 	{"queue_add", []string{"u"}, "u", "help.queue", "item"},
 	{"shuffle_play", []string{"S"}, "S", "help.shufpl", "item"},
 	{"open_clipboard", []string{"v"}, "v", "help.paste", "item"},
+	{"info", []string{"i"}, "i", "help.info", "item"},
 	{"move_down", []string{"J"}, "J", "help.k.movedown", "item"},
 	{"move_up", []string{"K"}, "K", "help.k.moveup", "item"},
 	{"delete", []string{"x", "delete"}, "x", "help.k.delete", "item"},

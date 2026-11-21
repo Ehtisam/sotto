@@ -46,7 +46,7 @@ func TestActionsOnTrackInOwnPlaylist(t *testing.T) {
 		t.Fatalf("target = %q", m.actions.target.uri)
 	}
 	// Beğeni durumu gelmeden "beğen" seçeneği yok; listeden çıkar var.
-	want := []actID{actQueue, actAddList, actRemoveList, actAlbum, actArtist, actLink}
+	want := []actID{actQueue, actAddList, actRemoveList, actAlbum, actArtist, actInfo, actLink}
 	if got := ids(m.actions.items); len(got) != len(want) {
 		t.Fatalf("items = %v, want %v", got, want)
 	}

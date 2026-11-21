@@ -26,7 +26,8 @@ func (m Model) fetchCovers() tea.Cmd {
 	if m.page == pageProfile && m.prof.open == nil {
 		photo, _, _ = m.profilePhoto()
 	}
-	for _, u := range []string{m.nowCoverURL(), m.openListCoverURL(), photo} {
+	extraPhoto, _, _ := m.extraPhoto()
+	for _, u := range []string{m.nowCoverURL(), m.openListCoverURL(), photo, extraPhoto} {
 		if u == "" || m.rt.coverAsked[u] || m.rt.covers.Has(u) {
 			continue
 		}
@@ -82,6 +83,8 @@ func (m Model) openListCoverURL() string {
 		return m.home.open.entry.image
 	case m.page == pageProfile && m.prof.open != nil:
 		return m.prof.open.entry.image
+	case m.extraOn() && m.extra.open != nil:
+		return m.extra.open.entry.image
 	}
 	return ""
 }

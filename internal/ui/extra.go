@@ -2,8 +2,11 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"charm.land/lipgloss/v2"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -23,6 +26,11 @@ const (
 	extraTop
 	extraRecent
 	extraLog
+	extraArtist // sanatçı sayfası (artist.go)
+	extraInfo   // ayrıntılar ve künye (info.go)
+	extraNews   // Yenilikler (news.go)
+	extraPeople // takipçiler, takip edilenler, arkadaş etkinliği (people.go)
+	extraUser   // başka bir kullanıcının profili (people.go)
 )
 
 type extraState struct {
@@ -42,6 +50,15 @@ type extraState struct {
 	tracks  []spotify.Track
 	artists []spotify.FullArtist
 	recent  []spotify.PlayHistory
+
+	artist *artistState
+	info   *infoState
+	news   *newsState
+	people *peopleState
+	user   *userState
+
+	// prev: bu sayfa başka bir ek sayfanın üstünde açıldıysa o (esc ona döner).
+	prev *extraState
 }
 
 type extraTopMsg struct {
@@ -147,6 +164,16 @@ func (m *Model) rebuildExtra() {
 		x.items = m.topItems()
 	case extraRecent:
 		x.items = m.recentPlayedItems()
+	case extraArtist:
+		x.items = m.artistItems()
+	case extraInfo:
+		x.items = m.infoItems()
+	case extraNews:
+		x.items = m.newsItems()
+	case extraPeople:
+		x.items = m.peopleItems()
+	case extraUser:
+		x.items = m.userItems()
 	case extraLog:
 		// Yeni kayıtlar üste eklenir: imleç aynı kayıtta kalsın.
 		old := len(x.items)
@@ -243,8 +270,13 @@ func (m Model) logItems() []searchItem {
 	return out
 }
 
-// extraHeight, ek sayfada liste satırlarına kalan yükseklik.
-func (m Model) extraHeight() int { return m.listHeight() }
+// extraHeight, ek sayfada liste satırlarına kalan yükseklik (fotoğraf varsa altı).
+func (m Model) extraHeight() int {
+	if _, _, rows := m.extraPhoto(); rows > 0 {
+		return max(m.listHeight()-rows-1, 1)
+	}
+	return m.listHeight()
+}
 
 func (m Model) extraKey(k string) (Model, tea.Cmd, bool) {
 	x := &m.extra
@@ -256,6 +288,31 @@ func (m Model) extraKey(k string) (Model, tea.Cmd, bool) {
 		return m, cmd, handled
 	}
 	lh := m.extraHeight()
+	if !anySelectable(x.items) { // yalnız yazı (Hakkında): j/k kaydırır
+		scroll := func(d int) {
+			x.scroll = max(0, min(x.scroll+d, len(x.items)-lh))
+		}
+		switch k {
+		case "up", "k":
+			scroll(-1)
+			return m, nil, true
+		case "down", "j":
+			scroll(1)
+			return m, nil, true
+		case "pgup":
+			scroll(-lh)
+			return m, nil, true
+		case "pgdown":
+			scroll(lh)
+			return m, nil, true
+		case "home", "g":
+			scroll(-1 << 30)
+			return m, nil, true
+		case "end", "G":
+			scroll(1 << 30)
+			return m, nil, true
+		}
+	}
 	move := func(d int) {
 		x.cursor = nextSelectable(x.items, x.cursor+d, d)
 		x.cursor, x.scroll = fitScroll(x.cursor, x.scroll, len(x.items), lh)
@@ -276,6 +333,23 @@ func (m Model) extraKey(k string) (Model, tea.Cmd, bool) {
 		move(-1 << 30)
 	case "end", "G":
 		move(1 << 30)
+	case "tab", "shift+tab":
+		d := 1
+		if k == "shift+tab" {
+			d = -1
+		}
+		switch x.page {
+		case extraArtist:
+			mm, cmd := m.switchArtistSection(d)
+			return mm, cmd, true
+		case extraPeople:
+			mm, cmd := m.switchPeopleSection(d)
+			return mm, cmd, true
+		case extraNews:
+			mm, cmd := m.switchNewsSection(d)
+			return mm, cmd, true
+		}
+		return m, nil, false
 	case "[", "]":
 		if x.page != extraTop {
 			return m, nil, false
@@ -293,6 +367,9 @@ func (m Model) extraKey(k string) (Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		m.refreshNow()
+		if mm, cmd, ok := m.reloadExtra(); ok {
+			return mm, cmd, true
+		}
 		mm, cmd := m.openExtra(x.page)
 		return mm.(Model), cmd, true
 	case "enter", "right":
@@ -309,6 +386,9 @@ func (m Model) extraKey(k string) (Model, tea.Cmd, bool) {
 		}
 		return m, cmd, true
 	case "e":
+		if x.page == extraUser && x.user != nil {
+			return m.openUserInBrowser(), nil, true
+		}
 		if x.page != extraLog {
 			return m, nil, false
 		}
@@ -317,6 +397,11 @@ func (m Model) extraKey(k string) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case "esc", "left", "backspace":
+		if x.prev != nil && x.prev.host == m.page {
+			m.extra = *x.prev
+			m.rebuildExtra()
+			return m, nil, true
+		}
 		m.extra = extraState{rng: x.rng}
 		if !m.page.hasContent() {
 			m.focus = focusMenu
@@ -332,6 +417,21 @@ func (m Model) extraView(w int) []string {
 	active := m.focus == focusContent
 	if x.open != nil {
 		return m.listView(x.open, w, active)
+	}
+	if head, ok := m.extraHeader(w); ok {
+		rows := head
+		if _, cw, _ := m.extraPhoto(); cw > 0 {
+			rows = append(rows, m.photoBlock(m.photoText(w-cw-3))...)
+		}
+		switch {
+		case len(x.items) == 0:
+			text, bad := m.extraEmpty()
+			if bad {
+				return append(rows, theme.Error.Render(truncate(text, w)))
+			}
+			return append(rows, theme.Dim.Render(truncate(text, w)))
+		}
+		return append(rows, m.itemRowsH(x.items, x.cursor, x.scroll, w, m.extraHeight(), active && anySelectable(x.items))...)
 	}
 	var title, sub string
 	switch x.page {
@@ -369,4 +469,150 @@ func (m Model) extraView(w int) []string {
 		return rows
 	}
 	return append(rows, m.itemRowsH(x.items, x.cursor, x.scroll, w, m.extraHeight(), active)...)
+}
+
+// anySelectable: satırlardan en az biri seçilebilir.
+func anySelectable(items []searchItem) bool {
+	for _, it := range items {
+		if it.selectable() {
+			return true
+		}
+	}
+	return false
+}
+
+// extraHeader, kendi başlığını çizen ek sayfaların başlığı (4 satır).
+func (m Model) extraHeader(w int) ([]string, bool) {
+	switch m.extra.page {
+	case extraArtist:
+		return m.artistHeader(w), true
+	case extraInfo:
+		return m.infoHeader(w), true
+	case extraNews:
+		return m.newsHeader(w), true
+	case extraPeople:
+		return m.peopleHeader(w), true
+	case extraUser:
+		return m.userHeader(w), true
+	}
+	return nil, false
+}
+
+// extraEmpty, satırı olmayan ek sayfada söylenecek (hata ise bad).
+func (m Model) extraEmpty() (text string, bad bool) {
+	switch m.extra.page {
+	case extraArtist:
+		return m.artistEmpty()
+	case extraInfo:
+		return m.infoEmpty()
+	case extraNews:
+		return m.newsEmpty()
+	case extraPeople:
+		return m.peopleEmpty()
+	case extraUser:
+		return m.userEmpty()
+	}
+	return T("extra.empty"), false
+}
+
+// reloadExtra, R: kendi verisini yükleyen ek sayfaları yeniden ister.
+func (m Model) reloadExtra() (Model, tea.Cmd, bool) {
+	x := &m.extra
+	switch x.page {
+	case extraArtist:
+		a := x.artist
+		a.viewLoading, a.albumsAsked = true, false
+		cmds := []tea.Cmd{m.loadArtistView(a)}
+		if a.section == artDisco {
+			a.albumsAsked, a.albumsLoading = true, true
+			cmds = append(cmds, m.loadArtistAlbums(a))
+		}
+		return m, tea.Batch(cmds...), true
+	case extraInfo:
+		return m, m.loadInfo(x.info), true
+	case extraNews:
+		x.news.loading = true
+		return m, m.loadNews(), true
+	case extraPeople:
+		return m, m.loadPeople(x.people.section), true
+	case extraUser:
+		x.user.loading = true
+		return m, m.loadUser(x.user.id), true
+	}
+	return m, nil, false
+}
+
+// openLists, sayfalarda ve ek sayfalarda (yığındakiler dahil) açık listeler.
+func (m Model) openLists() []*trackList {
+	out := []*trackList{m.lib.open, m.search.open, m.home.open, m.prof.open}
+	for x := &m.extra; x != nil; x = x.prev {
+		if x.open != nil {
+			out = append(out, x.open)
+		}
+	}
+	return out
+}
+
+// extraPhoto: sanatçının Hakkında bölümünde ve kullanıcı profilinde fotoğraf
+// (pencere yetiyorsa). Fotoğrafın altında listeye en az 6 satır kalır.
+func (m Model) extraPhoto() (url string, cols, rows int) {
+	if !m.cfg.Look.CoversOn() || !m.extraOn() || m.extra.open != nil {
+		return "", 0, 0
+	}
+	x := m.extra
+	switch {
+	case x.page == extraArtist && x.artist != nil && x.artist.section == artAbout:
+		if v := x.artist.view; v != nil {
+			url = v.Image
+		}
+		if in := x.artist.info; url == "" && in != nil {
+			url = pickImage(in.Images)
+		}
+	case x.page == extraUser && x.user != nil && x.user.view != nil:
+		url = x.user.view.Image
+	}
+	if url == "" {
+		return "", 0, 0
+	}
+	rows = min(8, m.listHeight()-1-6, (m.contentWidth()-3-24)/2)
+	if rows < 4 {
+		return "", 0, 0
+	}
+	return url, rows * 2, rows
+}
+
+// photoBlock, fotoğraf ve yanındaki yazılar (dikeyde ortalı) ile altına bir boş satır.
+func (m Model) photoBlock(lines []string) []string {
+	url, cw, ch := m.extraPhoto()
+	if url == "" {
+		return nil
+	}
+	for i := 0; i < (ch-len(lines))/2; i++ {
+		lines = append([]string{""}, lines...)
+	}
+	for len(lines) < ch {
+		lines = append(lines, "")
+	}
+	block := lipgloss.JoinHorizontal(lipgloss.Top, m.coverBox(url, cw, ch), "   ", strings.Join(lines[:ch], "\n"))
+	return append(strings.Split(block, "\n"), "")
+}
+
+// photoText, fotoğrafın yanına yazılacaklar.
+func (m Model) photoText(w int) []string {
+	x := m.extra
+	var out []string
+	switch x.page {
+	case extraArtist:
+		for _, it := range m.artistFacts(x.artist) {
+			out = append(out, row(it.name, it.sub, w, false))
+		}
+	case extraUser:
+		v := x.user.view
+		out = append(out, theme.Plain.Render(F("people.nfollowers", groupDigits(v.Followers))),
+			theme.Plain.Render(F("people.nfollowing", groupDigits(v.FollowingN))))
+		if v.Following {
+			out = append(out, theme.Hi.Render(T("people.youfollow")))
+		}
+	}
+	return out
 }

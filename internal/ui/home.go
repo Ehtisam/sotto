@@ -139,6 +139,7 @@ func (m Model) homeItems() []searchItem {
 		}
 	}
 	section("home.jump", jump)
+	section("home.discover", []searchItem{{kind: "more", name: "→ " + T("home.more.news"), section: "news"}})
 
 	// Son çalınanlar: aynı şarkı art arda tekrarlanmasın.
 	var recent []searchItem
@@ -264,7 +265,10 @@ func (m Model) homeKey(k string) (Model, tea.Cmd, bool) {
 		if len(h.items) == 0 {
 			return m, nil, true
 		}
-		if it := h.items[h.cursor]; it.kind == "more" {
+		if it := h.items[h.cursor]; it.kind == "more" && it.section == "news" {
+			mm, cmd := m.openNews()
+			return mm.(Model), cmd, true
+		} else if it.kind == "more" {
 			p := extraRecent
 			if it.section == "top" {
 				p = extraTop
