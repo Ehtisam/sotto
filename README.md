@@ -59,7 +59,14 @@ Most terminal Spotify clients play audio through librespot, and at the time of w
 
 ## Install
 
-Download the archive for your system from [Releases](https://github.com/Ehtisam/sotto/releases) and unpack it.
+On Windows, with [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add ehtisam https://github.com/Ehtisam/scoop-bucket
+scoop install sotto
+```
+
+Or download the archive for your system from [Releases](https://github.com/Ehtisam/sotto/releases) and unpack it.
 
 On Windows, run `sotto.exe` from Windows Terminal. On Linux:
 
