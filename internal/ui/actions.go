@@ -451,7 +451,7 @@ func (m Model) runAction(id actID) (Model, tea.Cmd) {
 		}
 		return m.goTo(t.entry)
 	case actLink:
-		return m.note(T("act.copied")), tea.SetClipboard(spotify.WebLink(uri))
+		return m.note(T("act.copied")), copyText(spotify.WebLink(uri))
 	case actRadio:
 		return m.note(T("act.radio.making")), m.startRadio(uri)
 	case actEdit:

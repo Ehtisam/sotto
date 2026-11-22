@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -14,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Ehtisam/sotto/internal/bridge"
+	"github.com/Ehtisam/sotto/internal/desktop"
 	"github.com/Ehtisam/sotto/internal/setup"
 	"github.com/Ehtisam/sotto/internal/spotify"
 	"github.com/Ehtisam/sotto/internal/ui/theme"
@@ -68,7 +70,63 @@ type wizardState struct {
 	bridgeAsked bool   // giriş sayfası açıldı
 	bridgeOK    bool
 	bridgeBusy  bool
+
+	clipSeen string // panoda en son bakılan metin (aynısı yeniden işlenmez)
 }
+
+// Pano izleme: sihirbaz açıkken pano arada bir okunur. Kullanıcı geliştirici
+// sitesinde Client ID'yi ya da Soloist anahtarını kopyalayınca sotto onu
+// kendisi alır; yapıştırmak gerekmez (yapıştırmak da çalışır).
+type wizClipTickMsg struct{}
+
+type wizClipMsg struct{ text string }
+
+// soloistKeyPattern: Soloist API anahtarları "spak_" ve 32 harf/rakam.
+var soloistKeyPattern = regexp.MustCompile(`^spak_[0-9A-Za-z]{32}$`)
+
+func wizClipWatch() tea.Cmd {
+	return tea.Tick(600*time.Millisecond, func(time.Time) tea.Msg { return wizClipTickMsg{} })
+}
+
+// wizClipboard, panoda bulunan anahtarı tanırsa kaydeder.
+func (m Model) wizClipboard(text string) (Model, tea.Cmd) {
+	w := &m.wiz
+	text = cleanInput(text)
+	if text == w.clipSeen || text == "" {
+		return m, nil
+	}
+	w.clipSeen = text
+	switch {
+	case soloistKeyPattern.MatchString(text) && m.cfg.SoloistAPIKey() != text:
+		// Hangi adımda olursa olsun: geliştirici sitesine tek gidişte ikisi de alınsın.
+		m.cfg.Soloist.APIKey = text
+		if err := m.cfg.Save(); err != nil {
+			w.err = err.Error()
+			return m, nil
+		}
+		if w.step == wizSpeaker {
+			w.input, w.err = "", ""
+		}
+		return m.note(T("wiz.clip.key")), nil
+	case clientIDPattern.MatchString(text) && w.step == wizApp && m.wizTyping():
+		w.input = text
+		m, cmd := m.wizSubmit()
+		return m.note(T("wiz.clip.id")), cmd
+	}
+	return m, nil
+}
+
+// copyText, metni panoya yazar; olmazsa terminale bırakır (OSC 52).
+func copyText(s string) tea.Cmd {
+	return func() tea.Msg {
+		if writeClipboard(s) == nil {
+			return nil
+		}
+		return tea.SetClipboard(s)()
+	}
+}
+
+var writeClipboard = desktop.WriteClipboard
 
 type wizDownloadedMsg struct {
 	what string
@@ -147,8 +205,18 @@ func (m Model) wizardKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.wizNext(), nil // bu adımı şimdilik atla
 	case "enter":
 		return m.wizEnter()
+	case "q":
+		return m, m.quit() // yazı kutusu yokken; varken ctrl+c
 	}
 	return m, nil
+}
+
+// pasteKey: Windows'ta ctrl+v, Linux/macOS terminallerinde ctrl+shift+v.
+func pasteKey() string {
+	if runtime.GOOS == "windows" {
+		return "ctrl+v"
+	}
+	return "ctrl+shift+v"
 }
 
 // wizardPaste, yapıştırılan metni yazı kutusuna koyar.
@@ -187,7 +255,8 @@ func (m Model) wizNext() Model {
 	return m
 }
 
-// wizOpenPage, adımın ilgili sayfasını tarayıcıda açar.
+// wizOpenPage, adımın ilgili sayfasını tarayıcıda açar. Uygulama adımında
+// Redirect URI de panoya kopyalanır (formda yapıştırılacak tek şey o).
 func (m Model) wizOpenPage() (Model, tea.Cmd) {
 	url := ""
 	switch m.wiz.step {
@@ -203,6 +272,10 @@ func (m Model) wizOpenPage() (Model, tea.Cmd) {
 	}
 	if err := openBrowser(url); err != nil {
 		return m.say(err.Error()), nil
+	}
+	if m.wiz.step == wizApp {
+		m.wiz.clipSeen = redirectURI
+		return m.note(T("wiz.opened.copied")), copyText(redirectURI)
 	}
 	return m.note(T("wiz.opened")), nil
 }
@@ -401,6 +474,20 @@ func (m Model) updateWizard(msg tea.Msg) (Model, tea.Cmd) {
 		if w.on && w.step == wizExtras && !w.bridgeOK {
 			return m.wizBridgeStep()
 		}
+	case wizClipTickMsg:
+		if !w.on {
+			return m, nil // sihirbaz kapandı: izleme biter
+		}
+		return m, func() tea.Msg {
+			text, _ := readClipboard()
+			return wizClipMsg{text}
+		}
+	case wizClipMsg:
+		if !w.on {
+			return m, nil
+		}
+		m, cmd := m.wizClipboard(msg.text)
+		return m, tea.Batch(cmd, wizClipWatch())
 	}
 	return m, nil
 }
@@ -450,6 +537,7 @@ func (m Model) wizardView(w int) []string {
 			shown = shown[:4] + strings.Repeat("•", len(shown)-4)
 		}
 		rows = append(rows, "", theme.Dim.Render(label), theme.Hi.Render("› ")+theme.Plain.Render(truncate(shown, w-4))+cursor)
+		rows = append(rows, theme.Faint.Render(truncate(T("wiz.clip.watch"), w)))
 	}
 	choices := func(a, b string) {
 		for i, s := range []string{a, b} {
@@ -498,6 +586,14 @@ func (m Model) wizardView(w int) []string {
 			numbered("wiz.app.1", "wiz.app.2", "wiz.app.3", "wiz.app.4")
 			rows = append(rows, "", theme.Faint.Render("   Redirect URI  ")+theme.Plain.Render(redirectURI))
 			box(T("wiz.app.box"))
+			if m.cfg.SoloistAPIKey() == "" {
+				rows = append(rows, "")
+				for _, line := range wrapText(T("wiz.app.soloist"), w) {
+					rows = append(rows, theme.Dim.Render(line))
+				}
+			} else {
+				ok(T("wiz.key.ok"))
+			}
 		}
 
 	case wizSpeaker:
@@ -594,7 +690,7 @@ func (m Model) wizardHints() []hint {
 	hs := []hint{}
 	switch {
 	case m.wizTyping():
-		hs = append(hs, hint{T("wiz.h.paste"), T("wiz.h.pastehint")}, hint{"enter", T("wiz.h.save")}, hint{"ctrl+o", T("wiz.h.open")})
+		hs = append(hs, hint{pasteKey(), T("wiz.h.pastehint")}, hint{"enter", T("wiz.h.save")}, hint{"ctrl+o", T("wiz.h.open")})
 	case (z.step == wizSpeaker && z.speaker == 0) || (z.step == wizExtras && z.extras == 0):
 		hs = append(hs, hint{"↑ ↓", T("hint.select")}, hint{"enter", T("wiz.h.choose")})
 	default:
@@ -606,7 +702,11 @@ func (m Model) wizardHints() []hint {
 	if z.step != wizWelcome && z.step != wizDone && !m.wizTyping() {
 		hs = append(hs, hint{"s", T("wiz.h.skip")})
 	}
-	return append(hs, hint{"esc", T("hint.back")})
+	quit := "q"
+	if m.wizTyping() {
+		quit = "ctrl+c" // q yazı kutusuna gider
+	}
+	return append(hs, hint{"esc", T("hint.back")}, hint{quit, T("hint.quit")})
 }
 
 // wrapText, metni kelime kelime w genişliğinde satırlara böler.

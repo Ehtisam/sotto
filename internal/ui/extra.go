@@ -385,7 +385,7 @@ func (m Model) extraKey(k string) (Model, tea.Cmd, bool) {
 		}
 		it := x.items[x.cursor]
 		if x.page == extraLog {
-			return m.note(T("act.copied")), tea.SetClipboard(it.sub + "  " + it.name), true
+			return m.note(T("act.copied")), copyText(it.sub + "  " + it.name), true
 		}
 		tl, cmd := m.actOn(it)
 		if tl != nil {

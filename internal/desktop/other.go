@@ -4,6 +4,7 @@ package desktop
 
 import (
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -61,4 +62,19 @@ func ReadClipboard() (string, error) {
 		}
 	}
 	return "", ErrUnsupported
+}
+
+// WriteClipboard, metni panoya yazar (pbcopy, wl-copy, xclip ya da xsel).
+func WriteClipboard(text string) error {
+	for _, c := range [][]string{{"pbcopy"}, {"wl-copy"}, {"xclip", "-selection", "clipboard"}, {"xsel", "-ib"}} {
+		if _, err := exec.LookPath(c[0]); err != nil {
+			continue
+		}
+		cmd := exec.Command(c[0], c[1:]...)
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+	return ErrUnsupported
 }

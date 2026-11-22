@@ -234,3 +234,84 @@ func TestWizardEscGoesBackAndCloses(t *testing.T) {
 		t.Fatal("esc on the first step closes the wizard")
 	}
 }
+
+// Pano: ctrl+o Redirect URI'yi kopyalar; sitede kopyalanan Client ID ve
+// Soloist anahtarı yapıştırmadan alınır. Aynı metin iki kez işlenmez.
+func TestWizardClipboard(t *testing.T) {
+	m, _ := wizModel(t)
+	if cmd := m.Init(); cmd == nil {
+		t.Fatal("no init command")
+	}
+	m, _ = wkey(t, m, "enter") // uygulama adımı
+	m, cmd := wkey(t, m, "ctrl+o")
+	if cmd == nil {
+		t.Fatal("ctrl+o should copy the Redirect URI")
+	}
+	cmd()
+	if lastCopied() != redirectURI || !strings.Contains(m.flash, "Redirect URI") {
+		t.Fatalf("copied %q flash %q", lastCopied(), m.flash)
+	}
+	clip := func(text string) tea.Cmd {
+		t.Helper()
+		out, cmd := m.Update(wizClipMsg{text})
+		m = out.(Model)
+		return cmd
+	}
+	// Kopyalanan Redirect URI (kendi yazdığımız) ve ilgisiz metin bir şey yapmaz.
+	clip(redirectURI)
+	clip("hello")
+	if m.spState == spLoggingIn || m.cfg.Soloist.APIKey != "" {
+		t.Fatal("unrelated text was taken")
+	}
+	// Uygulama adımındayken kopyalanan Soloist anahtarı da alınır.
+	key := "spak_" + strings.Repeat("aB3", 10) + "xy"
+	clip(key)
+	if m.cfg.Soloist.APIKey != key || !strings.Contains(configText(t, m), key) {
+		t.Fatal("Soloist key not saved")
+	}
+	if s := screenText(m); !strings.Contains(s, "Soloist key saved") || strings.Contains(s, "While you're on the site") {
+		t.Fatalf("app step should show the key as done:\n%s", s)
+	}
+	// Client ID: kaydedilir ve giriş başlar.
+	id := "0123456789abcdef0123456789ABCDEF"
+	if cmd := clip(id); cmd == nil || m.spState != spLoggingIn {
+		t.Fatalf("login should start, state %d err %q", m.spState, m.wiz.err)
+	}
+	if !strings.Contains(configText(t, m), `client_id = "0123456789abcdef0123456789abcdef"`) {
+		t.Fatal("Client ID not saved")
+	}
+	// Hafif mod seçilince anahtar sorulmaz, doğrudan indirmeye geçilir.
+	out, _ := m.Update(loginDoneMsg{})
+	m = out.(Model)
+	m, _ = wkey(t, m, "enter") // hoparlör adımı
+	m, _ = wkey(t, m, "enter") // hafif mod
+	if s := screenText(m); m.wizTyping() || !strings.Contains(s, "download Soloist") {
+		t.Fatalf("key already saved: should ask to download\n%s", s)
+	}
+	// Sihirbaz kapanınca izleme biter.
+	m.wiz.on = false
+	if out, cmd := m.Update(wizClipTickMsg{}); cmd != nil {
+		_ = out
+		t.Fatal("watching should stop when the wizard closes")
+	}
+}
+
+// q sihirbazdan çıkar (yazı kutusu yokken); yazı kutusundayken q yazılır,
+// çıkış ctrl+c. İkisi de alt satırda yazar.
+func TestWizardQuit(t *testing.T) {
+	m, _ := wizModel(t)
+	if !strings.Contains(screenText(m), "q quit") {
+		t.Fatalf("welcome step should show q quit:\n%s", screenText(m))
+	}
+	if _, cmd := wkey(t, m, "q"); cmd == nil {
+		t.Fatal("q should quit the wizard")
+	}
+	m, _ = wkey(t, m, "enter") // Client ID kutusu
+	m, cmd := wkey(t, m, "q")
+	if m.wiz.input != "q" || cmd != nil {
+		t.Fatalf("q in the box should be typed, input %q", m.wiz.input)
+	}
+	if !strings.Contains(screenText(m), "ctrl+c quit") {
+		t.Fatal("the box step should show ctrl+c quit")
+	}
+}

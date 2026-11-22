@@ -429,7 +429,12 @@ func (m Model) engineMessage() []string {
 		case errors.Is(err, soloist.ErrNoAPIKey):
 			rows = []string{
 				theme.Plain.Render(T("eng.nokey")),
-				theme.Faint.Render(T("eng.savekey")) + theme.Dim.Render(m.cfg.ConfigFile()),
+				theme.Faint.Render(T("eng.nokey.how")),
+			}
+		case errors.Is(err, soloist.ErrExpired) && m.set.updating != nil:
+			rows = []string{
+				theme.Plain.Render(T("eng.expired")),
+				theme.Dim.Render(T("eng.expired.updating")),
 			}
 		case errors.Is(err, soloist.ErrExpired):
 			rows = []string{
@@ -454,7 +459,11 @@ func (m Model) engineMessage() []string {
 				theme.Faint.Render(T("eng.log")) + theme.Dim.Render(m.cfg.SoloistLog()),
 			}
 		}
-		return append(rows, "", theme.Faint.Render(T("eng.retry")))
+		rows = append(rows, "", theme.Faint.Render(T("eng.retry")))
+		if m.spState == spReady { // Soloist olmadan da sotto bir kumanda
+			rows = append(rows, theme.Faint.Render(T("eng.remote")))
+		}
+		return rows
 	}
 	if !m.haveAuth {
 		return []string{theme.Dim.Render(T("eng.connecting"))}

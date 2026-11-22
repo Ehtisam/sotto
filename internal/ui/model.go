@@ -464,6 +464,8 @@ func (m Model) Init() tea.Cmd {
 	}
 	if !m.wiz.on {
 		cmds = append(cmds, m.readSoloistBuild()) // süre uyarısı ve Ayarlar için
+	} else {
+		cmds = append(cmds, wizClipWatch()) // kopyalanan Client ID / Soloist anahtarı
 	}
 	return tea.Batch(cmds...)
 }
@@ -633,7 +635,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hiddenMsg:
 		return m.updateHidden(msg)
 
-	case wizDownloadedMsg, wizBridgeMsg, wizBridgeRetryMsg:
+	case wizDownloadedMsg, wizBridgeMsg, wizBridgeRetryMsg, wizClipTickMsg, wizClipMsg:
 		return m.updateWizard(msg)
 
 	case tea.PasteMsg:
