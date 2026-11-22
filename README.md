@@ -59,14 +59,16 @@ Most terminal Spotify clients play audio through librespot, and at the time of w
 
 ## Install
 
-Download the file for your system from [Releases](https://github.com/Ehtisam/sotto/releases) and run it.
+Download the archive for your system from [Releases](https://github.com/Ehtisam/sotto/releases) and unpack it.
 
-On Linux, make it executable first:
+On Windows, run `sotto.exe` from Windows Terminal. On Linux:
 
 ```sh
-chmod +x sotto
+tar xzf sotto_0.1.0_linux_x86_64.tar.gz
 ./sotto
 ```
+
+`checksums.txt` has the SHA-256 of every file.
 
 With Go 1.27 or newer you can also build it yourself:
 
