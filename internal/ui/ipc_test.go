@@ -26,7 +26,7 @@ func TestIPCStatusFromModel(t *testing.T) {
 	m := eventsModel(t)
 	m.state.Volume = 35
 	_, r := ask(t, m, "status")
-	if !r.OK || !strings.Contains(r.Text, "now") || !strings.Contains(string(r.Data), `"volume":35`) || !strings.Contains(r.Text, "KaBoom.2") {
+	if !r.OK || !strings.Contains(r.Text, "now") || !strings.Contains(string(r.Data), `"volume":35`) || !strings.Contains(r.Text, "Road Trip") {
 		t.Fatalf("%+v", r)
 	}
 	_, r = ask(t, m, "vol")

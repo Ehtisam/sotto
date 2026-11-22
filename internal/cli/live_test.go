@@ -24,7 +24,7 @@ func TestLiveFind(t *testing.T) {
 		{"seksendört neyin var", "", "Neyin Var"},
 		{"random access memories", "album", "Random Access Memories"},
 		{"radiohead", "artist", "Radiohead"},
-		{"kaboom", "playlist", ""},
+		{"today's top hits", "playlist", ""},
 	} {
 		uri, label, err := Find(ctx, sp, c.words, c.kind)
 		t.Logf("%q (%s) → %s %s %v", c.words, c.kind, label, uri, err)

@@ -77,9 +77,9 @@ func TestRemoteRestrictions(t *testing.T) {
 	m := eventsModel(t)
 	no := false
 	st := &spotify.PlayerState{}
-	st.Device.Name, st.Device.SupportsVolume = "2312DRA50I", &no
+	st.Device.Name, st.Device.SupportsVolume = "Pixel 8", &no
 	st.Actions.Disallows = map[string]bool{"toggling_repeat_context": true, "toggling_shuffle": true}
-	m.remote.active, m.remote.device, m.remote.player = true, "2312DRA50I", st
+	m.remote.active, m.remote.device, m.remote.player = true, "Pixel 8", st
 	for _, c := range []struct {
 		cmd  tea.Cmd
 		want string
@@ -90,7 +90,7 @@ func TestRemoteRestrictions(t *testing.T) {
 	} {
 		msg := c.cmd()
 		f, ok := msg.(flashMsg)
-		if !ok || !strings.Contains(string(f), c.want) || !strings.Contains(string(f), "2312DRA50I") {
+		if !ok || !strings.Contains(string(f), c.want) || !strings.Contains(string(f), "Pixel 8") {
 			t.Errorf("got %#v, want flash with %q", msg, c.want)
 		}
 	}

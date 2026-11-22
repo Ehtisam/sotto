@@ -20,7 +20,7 @@ func queueModel(t *testing.T) Model {
 	m.page, m.focus = pageQueue, focusContent
 	m.state.Item = entity("now")
 	ctx := &soloist.Entity{URI: "spotify:playlist:pl", EntityType: "playlist"}
-	ctx.Decorations.Identity.Name = "KaBoom.2"
+	ctx.Decorations.Identity.Name = "Road Trip"
 	m.state.Context = ctx
 	m.queue.Upcoming = []soloist.QueueEntry{
 		{Source: "queue", Item: entity("q1")},
@@ -57,7 +57,7 @@ func TestQueueSections(t *testing.T) {
 			t.Fatalf("kinds = %v, want %v", got, want)
 		}
 	}
-	if items[6].name != "Next from KaBoom.2" {
+	if items[6].name != "Next from Road Trip" {
 		t.Fatalf("context header = %q", items[6].name)
 	}
 	// Atlama sayıları sıradaki yerle aynı; çalan şarkı -1.

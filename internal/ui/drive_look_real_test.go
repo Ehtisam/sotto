@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -15,22 +16,27 @@ import (
 func TestDriveLookReal(t *testing.T) {
 	d := drive(t)
 
-	// Kitaplık: KaBoom.2'yi sayfa içi aramayla bul ve aç.
+	// Kitaplık: kendi listelerinden birini (SOTTO_LIVE_PLAYLIST, adının bir
+	// parçası) sayfa içi aramayla bul ve aç.
+	list := strings.ToLower(os.Getenv("SOTTO_LIVE_PLAYLIST"))
+	if list == "" {
+		t.Skip("SOTTO_LIVE_PLAYLIST: part of the name of one of your playlists")
+	}
 	d.do("gl<wait:2500>")
 	m := d.model()
 	if m.page != pageLibrary || len(m.lib.entries) < 2 {
 		t.Fatalf("library: page %v entries %d\n%s", m.page, len(m.lib.entries), d.screen())
 	}
-	d.do("/kaboom<wait:300>")
+	d.do("/" + list + "<wait:300>")
 	vis := d.model().libVisible()
-	if len(vis) == 0 || !strings.Contains(strings.ToLower(vis[0].name), "kaboom") {
-		t.Fatalf("filter kaboom: %v\n%s", names(vis), d.screen())
+	if len(vis) == 0 || !strings.Contains(strings.ToLower(vis[0].name), list) {
+		t.Fatalf("filter %q: %v\n%s", list, names(vis), d.screen())
 	}
 	d.do("<enter><enter><wait:2500>")
 	m = d.model()
 	tl := m.lib.open
 	if tl == nil || len(tl.tracks) == 0 {
-		t.Fatalf("KaBoom.2 not open\n%s", d.screen())
+		t.Fatalf("%q not open\n%s", list, d.screen())
 	}
 	t.Logf("opened %q: %d of %d songs", tl.entry.name, len(tl.tracks), tl.total)
 

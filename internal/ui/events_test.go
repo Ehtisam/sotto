@@ -111,7 +111,7 @@ func TestTrackChangeNotifiesAndRunsHook(t *testing.T) {
 		t.Fatalf("hooks = %v", c.hooks)
 	}
 	env := strings.Join(c.env[0], "\n")
-	for _, want := range []string{"SOTTO_TITLE=q1", "SOTTO_URI=spotify:track:q1", "SOTTO_STATUS=playing", "SOTTO_CONTEXT=KaBoom.2"} {
+	for _, want := range []string{"SOTTO_TITLE=q1", "SOTTO_URI=spotify:track:q1", "SOTTO_STATUS=playing", "SOTTO_CONTEXT=Road Trip"} {
 		if !strings.Contains(env, want) {
 			t.Errorf("env lacks %s", want)
 		}

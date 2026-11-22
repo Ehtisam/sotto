@@ -35,7 +35,7 @@ func homeModel(t *testing.T) Model {
 	m.now = time.Date(2026, 11, 20, 20, 0, 0, 0, time.UTC)
 	m.lib.entries = []libEntry{
 		{kind: kindLiked, key: likedKey, name: "Liked Songs", total: 3},
-		{kind: kindPlaylist, key: "pl", uri: "spotify:playlist:pl", name: "KaBoom.2"},
+		{kind: kindPlaylist, key: "pl", uri: "spotify:playlist:pl", name: "Road Trip"},
 	}
 	return m
 }
@@ -66,7 +66,7 @@ func TestHomeSections(t *testing.T) {
 			t.Fatalf("kinds = %v, want %v", kinds, want)
 		}
 	}
-	if m.home.items[1].name != "KaBoom.2" {
+	if m.home.items[1].name != "Road Trip" {
 		t.Fatalf("playlist name = %q", m.home.items[1].name)
 	}
 	if m.home.cursor != 1 {

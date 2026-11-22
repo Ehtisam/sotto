@@ -74,7 +74,7 @@ func TestFlags(t *testing.T) {
 }
 
 func TestFindPlaylistAndDevice(t *testing.T) {
-	lists := []spotify.Playlist{{ID: "a", URI: "spotify:playlist:a", Name: "KaBoom.2"}, {ID: "b", URI: "spotify:playlist:b", Name: "Kahve"}, {ID: "c", URI: "spotify:playlist:c", Name: "kaboom.2"}}
+	lists := []spotify.Playlist{{ID: "a", URI: "spotify:playlist:a", Name: "Road Trip"}, {ID: "b", URI: "spotify:playlist:b", Name: "Kahve"}, {ID: "c", URI: "spotify:playlist:c", Name: "kalimba"}}
 	if _, err := findPlaylist(lists, "ka"); err == nil || !strings.Contains(err.Error(), "more than one") {
 		t.Fatalf("ambiguous: %v", err)
 	}
@@ -94,9 +94,9 @@ func TestFindPlaylistAndDevice(t *testing.T) {
 }
 
 func TestStatusText(t *testing.T) {
-	s := Status{Playing: true, Title: "Song", Artist: "Band", Album: "LP", URI: "spotify:track:x", PositionMS: 61000, DurationMS: 185000, Volume: 40, Device: "sotto", Context: "KaBoom.2"}
+	s := Status{Playing: true, Title: "Song", Artist: "Band", Album: "LP", URI: "spotify:track:x", PositionMS: 61000, DurationMS: 185000, Volume: 40, Device: "sotto", Context: "Road Trip"}
 	txt := s.Text()
-	for _, want := range []string{"▶ Song — Band", "1:01 / 3:05", "vol 40%", "from KaBoom.2"} {
+	for _, want := range []string{"▶ Song — Band", "1:01 / 3:05", "vol 40%", "from Road Trip"} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("%q lacks %q", txt, want)
 		}

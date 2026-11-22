@@ -77,13 +77,13 @@ func TestMprisState(t *testing.T) {
 }
 
 func TestDesktopEntry(t *testing.T) {
-	e := desktopEntry("/home/sols/sotto")
-	for _, line := range []string{"[Desktop Entry]", "Exec=/home/sols/sotto", "Icon=sotto", "Terminal=true", "Name=sotto"} {
+	e := desktopEntry("/home/user/sotto")
+	for _, line := range []string{"[Desktop Entry]", "Exec=/home/user/sotto", "Icon=sotto", "Terminal=true", "Name=sotto"} {
 		if !strings.Contains(e, line+"\n") {
 			t.Errorf("missing %q in\n%s", line, e)
 		}
 	}
-	for _, p := range []string{"/home/sols/sotto", "/home/a b/my $dir/so`t\"to", `/opt/x\y/sotto`} {
+	for _, p := range []string{"/home/user/sotto", "/home/a b/my $dir/so`t\"to", `/opt/x\y/sotto`} {
 		q := execQuote(p)
 		if back := execTarget("Exec=" + q); back != p {
 			t.Errorf("%q → %q → %q", p, q, back)

@@ -171,7 +171,7 @@ func TestProfilePhotoGrowsWithTheWindow(t *testing.T) {
 // Dar pencerede sayılar alt satıra geçer; hiçbir satır taşmaz ("…" yok).
 func TestProfileStatsWrapInsteadOfOverflowing(t *testing.T) {
 	m := profileModel(t)
-	m.me.DisplayName = "Karmathan「 雨 」"
+	m.me.DisplayName = "Mira「 雨 」"
 	m.me.Images = []spotify.Image{{URL: "https://example.test/me.jpg", Width: 300}}
 	m.prof.countsAt, m.prof.following, m.prof.albums = m.now, 12, 1
 	for _, width := range []int{100, 80, 60} {
