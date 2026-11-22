@@ -59,7 +59,13 @@ Most terminal Spotify clients play audio through librespot, and at the time of w
 
 ## Install
 
-On Windows, with [Scoop](https://scoop.sh):
+On Windows, with winget:
+
+```powershell
+winget install sotto
+```
+
+Or with [Scoop](https://scoop.sh):
 
 ```powershell
 scoop bucket add ehtisam https://github.com/Ehtisam/scoop-bucket
