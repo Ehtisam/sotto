@@ -32,7 +32,7 @@ var Remote = map[string]bool{
 var commands = map[string]bool{
 	"search": true, "devices": true, "queue": true, "playlist": true,
 	"doctor": true, "help": true, "version": true, "theme": true, "history": true,
-	"completion": true, "__complete": true,
+	"completion": true, "__complete": true, "mcp": true,
 }
 
 // IsCommand, ilk argüman bir komut mu (değilse arayüz açılır).
@@ -88,38 +88,38 @@ func Main(cfg config.Config, args []string, stdout, stderr io.Writer, stdin io.R
 		return History(cfg, cargs, stdout, stderr, asJSON)
 	case "completion":
 		return Completion(cargs, stdout, stderr)
+	case "mcp":
+		return MCP(cfg, stdin, stdout, stderr)
 	}
 	if !IsCommand(cmd) {
 		fmt.Fprintf(stderr, "sotto: unknown command %q (sotto help lists them)\n", cmd)
 		return 2
 	}
-	req := ipc.Request{Cmd: cmd, Args: cargs}
+	return print(Run(cfg, ipc.Request{Cmd: cmd, Args: cargs}, stdin, stderr), asJSON, stdout, stderr)
+}
 
-	var resp ipc.Response
-	handled := false
-	if Remote[cmd] {
+// Run, bir komutu yürütür: çalma komutları açık sotto'ya gider (yoksa ve
+// diğerlerinde doğrudan Web API). Komut satırı ve MCP sunucusu ortak kullanır.
+func Run(cfg config.Config, req ipc.Request, stdin io.Reader, stderr io.Writer) ipc.Response {
+	if Remote[req.Cmd] {
 		r, err := ipc.Call(ipc.Path(cfg.LocalDir), req, 2*time.Minute)
 		if err == nil {
-			resp, handled = r, true
-		} else if !errors.Is(err, ipc.ErrNotRunning) {
-			fmt.Fprintln(stderr, "sotto:", err)
-			return 1
+			return r
+		}
+		if !errors.Is(err, ipc.ErrNotRunning) {
+			return ipc.Fail(err)
 		}
 	}
-	if !handled {
-		sp := spotify.NewClient(cfg.Spotify.ClientID, cfg.TokenFile())
-		switch {
-		case !sp.HasClientID():
-			resp = ipc.Fail(errors.New("sotto is not set up yet; run sotto setup"))
-		case !sp.HasLogin():
-			resp = ipc.Fail(errors.New("not logged in to Spotify; open sotto and log in"))
-		default:
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			resp = Direct(ctx, sp, req, stdin, stderr)
-			cancel()
-		}
+	sp := spotify.NewClient(cfg.Spotify.ClientID, cfg.TokenFile())
+	switch {
+	case !sp.HasClientID():
+		return ipc.Fail(errors.New("sotto is not set up yet; run sotto setup"))
+	case !sp.HasLogin():
+		return ipc.Fail(errors.New("not logged in to Spotify; open sotto and log in"))
 	}
-	return print(resp, asJSON, stdout, stderr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return Direct(ctx, sp, req, stdin, stderr)
 }
 
 func print(r ipc.Response, asJSON bool, stdout, stderr io.Writer) int {
@@ -239,6 +239,8 @@ Library:
                             what you listened to while sotto was open, with
                             the most played songs and artists (--json too)
   sotto doctor              check the setup
+  sotto mcp                 MCP server, so AI assistants can use sotto; e.g.
+                            claude mcp add sotto -- sotto mcp
   sotto completion powershell|bash|zsh|fish
                             print a tab-completion script; for PowerShell add
                             sotto completion powershell | Out-String | Invoke-Expression

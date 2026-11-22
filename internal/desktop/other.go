@@ -5,7 +5,6 @@ package desktop
 import (
 	"os/exec"
 	"strings"
-	"time"
 )
 
 // SetDataDir: yalnızca Windows'ta kullanılır.
@@ -28,21 +27,8 @@ func Notify(n Note) error {
 	return exec.Command(path, args...).Run()
 }
 
-// Media: bu sistemde medya denetimi yok.
-type Media struct{}
-
-func OpenMedia() (*Media, error)                      { return nil, ErrUnsupported }
-func (m *Media) Events() <-chan Event                 { return nil }
-func (m *Media) SetTrack(Track) error                 { return nil }
-func (m *Media) SetStatus(Status) error               { return nil }
-func (m *Media) SetPosition(_, _ time.Duration) error { return nil }
-func (m *Media) Close()                               {}
-
-// Başlat menüsü kısayolu yalnızca Windows'ta.
-func InstallShortcut(string) error                    { return ErrUnsupported }
-func RemoveShortcut() error                           { return nil }
-func ShortcutInfo() (target, appID string, err error) { return "", "", ErrUnsupported }
-func ShortcutOK(string) bool                          { return true }
+// Medya kartı ve menü kısayolu: Linux'ta media_linux.go ve shortcut_linux.go,
+// diğerlerinde other_nolinux.go.
 
 // RefreshIcons: yalnızca Windows.
 func RefreshIcons() bool { return false }

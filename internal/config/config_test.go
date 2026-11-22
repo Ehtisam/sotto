@@ -86,3 +86,15 @@ func TestSoloistNormalize(t *testing.T) {
 		}
 	}
 }
+
+func TestLanguageFrom(t *testing.T) {
+	for in, want := range map[string]string{
+		"tr-TR": "tr", "tr_TR.UTF-8": "tr", "TR": "tr", "tr.UTF-8": "tr",
+		"en-US": "en", "de_DE.UTF-8": "en", "": "en", "trk": "en",
+	} {
+		if got := languageFrom(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+	t.Logf("this system: %q → %s", systemLocale(), SystemLanguage())
+}

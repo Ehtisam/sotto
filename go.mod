@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/coder/websocket v1.8.15
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/lucasb-eyer/go-colorful v1.4.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	golang.org/x/sys v0.47.0

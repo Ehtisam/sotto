@@ -61,7 +61,11 @@ type Look struct {
 	Buttons     bool   `toml:"strip_buttons"` // şeritte tıklanabilir düğmeler
 	VizStyle    string `toml:"viz_style"`     // tam ekran görselleştirme (V): bars, winamp, scope, vu, cassette
 	Layout      string `toml:"layout"`        // plain (çizgiler) ya da boxed (kutular)
+	Panel       string `toml:"side_panel"`    // geniş pencerede sağda çalan şarkı paneli: auto ya da off
 }
+
+// PanelOn: yan panel açık mı (yer varsa gösterilir).
+func (l Look) PanelOn() bool { return l.Panel != "off" }
 
 // CoversOn: kapaklar çizilsin mi.
 func (l Look) CoversOn() bool { return l.Covers != "off" }
@@ -161,7 +165,7 @@ const (
 
 func defaults() Config {
 	return Config{Language: "en", Look: Look{Theme: "cardo", Covers: "image", LineNumbers: "absolute", Border: "line",
-		Icons: "unicode", Strip: "bottom", StripFormat: DefaultStripFormat, Progress: "line", WindowTitle: DefaultWindowTitle, Mouse: true, Visualizer: "now", Menu: "left", Layout: "plain", VizStyle: "bars"}, Soloist: Soloist{Autostart: true, OnStart: "paused", Quality: "very_high", Normalize: true, AutoUpdate: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true},
+		Icons: "unicode", Strip: "bottom", StripFormat: DefaultStripFormat, Progress: "line", WindowTitle: DefaultWindowTitle, Mouse: true, Visualizer: "now", Menu: "left", Layout: "plain", VizStyle: "bars", Panel: "auto"}, Soloist: Soloist{Autostart: true, OnStart: "paused", Quality: "very_high", Normalize: true, AutoUpdate: true, DeviceName: "sotto", InitialVolume: 40}, Extras: Extras{Enabled: true},
 		Desktop: Desktop{Notify: "unfocused", NotifyTitle: "{title}", NotifyBody: "{artist} · {album}", MediaControls: true, StartMenu: true}}
 }
 
@@ -185,6 +189,7 @@ func Load() (Config, error) {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		exists = false
+		c.Language = SystemLanguage() // ilk açılış: sistemin dili
 	case err != nil:
 		return c, err
 	default:
@@ -192,7 +197,7 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("%s: %w", c.ConfigFile(), err)
 		}
 		// Yeni sürümle gelen bölümler dosyada yoksa açıklamalarıyla eklensin.
-		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]", "[desktop]", "[hooks]", "on_start =", "crossfade =", "auto_update =", "start_menu =", "line_numbers =", "[colors]", "visualizer =", "layout =", "discord ="} {
+		for _, section := range []string{"[look]", "[spotify]", "[soloist]", "[extras]", "[desktop]", "[hooks]", "on_start =", "crossfade =", "auto_update =", "start_menu =", "line_numbers =", "[colors]", "visualizer =", "layout =", "discord =", "side_panel ="} {
 			if !strings.Contains(string(b), section) {
 				exists = false
 			}
@@ -257,6 +262,7 @@ func (c Config) Save() error {
 		quote(c.Look.Visualizer),
 		quote(c.Look.Menu),
 		quote(c.Look.Layout),
+		quote(c.Look.Panel),
 		c.Look.Buttons,
 		quote(c.Look.VizStyle),
 		quote(c.Spotify.ClientID),
@@ -336,6 +342,10 @@ menu = %s
 # "plain" separates the parts of the screen with lines; "boxed" puts the menu,
 # the page and the now-playing strip in rounded boxes, the one in use coloured.
 layout = %s
+# In a wide window (about 150 columns or more), a panel on the right keeps the
+# playing song, its cover, the lyrics and what comes next in view on every
+# page: "auto" or "off".
+side_panel = %s
 # Buttons in the now-playing strip for the mouse: previous, play/pause, next,
 # shuffle and repeat.
 strip_buttons = %t
@@ -391,11 +401,12 @@ notify = %s
 # Notification text. Fields: {title} {artist} {album} {context} {device}.
 notify_title = %s
 notify_body = %s
-# Media keys and the system media card (Windows: volume flyout, lock screen).
+# Media keys and the system media card (Windows: volume flyout, lock screen;
+# Linux: MPRIS, so desktop media controls and playerctl see sotto).
 media_controls = %t
-# Windows: put sotto in the Start menu. Windows takes the name and icon on the
-# media card and on notifications from there; without it the card says
-# "Unknown app".
+# Put sotto in the Start menu (Windows) or the app menu (Linux). Windows takes
+# the name and icon on the media card and on notifications from there; without
+# it the card says "Unknown app".
 start_menu = %t
 # Show what you're listening to on your Discord profile (Discord must be open).
 # It shows as "Listening to sotto". To use your own app instead, put the

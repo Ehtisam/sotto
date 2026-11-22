@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ const (
 	setStrip
 	setMenuPos
 	setLayout
+	setPanel
 	setButtons
 	setMouse
 	setVisualizer
@@ -62,11 +64,17 @@ const (
 // settingNames, çeviri anahtarlarında kullanılan adlar (set.name.X, set.help.X).
 var settingNames = map[settingID]string{
 	setTheme: "theme", setAccent: "accent", setCovers: "covers", setLanguage: "language",
-	setLineNumbers: "linenumbers", setBorder: "border", setIcons: "icons", setProgress: "progress", setStrip: "strip", setMenuPos: "menupos", setLayout: "layout", setButtons: "buttons",
+	setLineNumbers: "linenumbers", setBorder: "border", setIcons: "icons", setProgress: "progress", setStrip: "strip", setMenuPos: "menupos", setLayout: "layout", setPanel: "panel", setButtons: "buttons",
 	setMouse: "mouse", setVisualizer: "visualizer", setKeymap: "keymap", setThemes: "themes",
 	setAutostart: "autostart", setResume: "resume", setCrossfade: "crossfade", setQuality: "quality", setNormalize: "normalize", setVolume: "volume", setSoloist: "soloist", setSoloistAuto: "soloistauto",
 	setNotify: "notify", setMedia: "media", setStartMenu: "startmenu", setDiscord: "discord", setExtras: "extras",
 	setPrivate: "private", setAccount: "account", setConfigFile: "config",
+}
+
+func init() {
+	if runtime.GOOS != "windows" { // Linux'ta "Başlat menüsü" yerine uygulama menüsü
+		settingNames[setStartMenu] = "appmenu"
+	}
 }
 
 type settingsState struct {
@@ -95,7 +103,7 @@ type settingRow struct {
 var settingRows = []settingRow{
 	{id: -1, section: "set.look"},
 	{id: setTheme}, {id: setAccent}, {id: setCovers}, {id: setLanguage},
-	{id: setLineNumbers}, {id: setBorder}, {id: setIcons}, {id: setProgress}, {id: setStrip}, {id: setMenuPos}, {id: setLayout}, {id: setMouse}, {id: setButtons}, {id: setVisualizer},
+	{id: setLineNumbers}, {id: setBorder}, {id: setIcons}, {id: setProgress}, {id: setStrip}, {id: setMenuPos}, {id: setLayout}, {id: setPanel}, {id: setMouse}, {id: setButtons}, {id: setVisualizer},
 	{id: setKeymap}, {id: setThemes},
 	{id: -1, section: "set.speaker"},
 	{id: setAutostart}, {id: setResume}, {id: setCrossfade}, {id: setQuality}, {id: setNormalize},
@@ -280,6 +288,8 @@ func (m Model) settingValue(id settingID) string {
 		return T("set.menupos." + orDefault(c.Look.Menu, "left"))
 	case setLayout:
 		return T("set.layout." + orDefault(c.Look.Layout, "plain"))
+	case setPanel:
+		return T("set.panel." + orDefault(c.Look.Panel, "auto"))
 	case setMouse:
 		return onOff(c.Look.Mouse)
 	case setButtons:
@@ -371,6 +381,8 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 		c.Look.Menu = cycleOf([]string{"left", "right", "hidden"}, orDefault(c.Look.Menu, "left"), d)
 	case setLayout:
 		c.Look.Layout = cycleOf([]string{"plain", "boxed"}, orDefault(c.Look.Layout, "plain"), d)
+	case setPanel:
+		c.Look.Panel = cycleOf([]string{"auto", "off"}, orDefault(c.Look.Panel, "auto"), d)
 	case setMouse:
 		c.Look.Mouse = !c.Look.Mouse
 	case setButtons:
@@ -488,7 +500,7 @@ func (m Model) change(id settingID, d int) (Model, tea.Cmd) {
 	// Renkler ya da yerleşim değişince ekran baştan boyanır ve kapak resimlerinin
 	// üstü de boyanır: resimleri (boyut değişimindeki gibi) yeniden gönder.
 	switch id {
-	case setTheme, setAccent, setCovers, setBorder, setIcons, setProgress, setStrip, setLineNumbers, setLanguage, setMenuPos, setLayout:
+	case setTheme, setAccent, setCovers, setBorder, setIcons, setProgress, setStrip, setLineNumbers, setLanguage, setMenuPos, setLayout, setPanel:
 		m.rt.gfx.drawn = nil
 		return m.note(note), m.afterResize()
 	}

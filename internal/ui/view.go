@@ -141,6 +141,17 @@ func (m Model) body(w int, l layout) string {
 	h := l.bodyH
 	var block string
 	switch {
+	case l.panel: // menü (solda ya da sağda), içerik ve yan panel
+		cols := []string{strings.Repeat(" ", margin)}
+		if l.menu && !l.menuRight {
+			cols = append(cols, m.menu(h), strings.Repeat(" ", gutter))
+		}
+		cols = append(cols, lipgloss.NewStyle().Width(l.contentW).MaxWidth(l.contentW).Render(m.content(l.contentW, h)),
+			strings.Repeat(" ", gutter), m.sidePanel(panelW, h))
+		if l.menu && l.menuRight {
+			cols = append(cols, strings.Repeat(" ", gutter), m.menu(h))
+		}
+		block = lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	case !l.menu: // dar pencere ya da menü gizli
 		block = lipgloss.NewStyle().MarginLeft(margin).Render(m.content(l.contentW, h))
 	case l.menuRight:
@@ -173,18 +184,25 @@ func (m Model) bodyBoxed(w int, l layout) string {
 		return lines
 	}
 	contentBox := theme.Box(padded(m.content(l.contentW, h)), l.contentW+4, h+2, "", m.focus == focusContent)
+	// Kutular soldan sağa: [menü] içerik [yan panel] [menü sağdaysa].
+	var boxes [][]string
+	if l.menu && !l.menuRight {
+		boxes = append(boxes, theme.Box(padded(m.menu(h)), menuWidth+4, h+2, "", m.focus == focusMenu))
+	}
+	boxes = append(boxes, contentBox)
+	if l.panel {
+		boxes = append(boxes, theme.Box(padded(m.sidePanel(panelW, h)), panelW+4, h+2, "", false))
+	}
+	if l.menu && l.menuRight {
+		boxes = append(boxes, theme.Box(padded(m.menu(h)), menuWidth+4, h+2, "", m.focus == focusMenu))
+	}
 	var rows []string
-	if !l.menu {
-		rows = contentBox
-	} else {
-		menuBox := theme.Box(padded(m.menu(h)), menuWidth+4, h+2, "", m.focus == focusMenu)
-		left, right := menuBox, contentBox
-		if l.menuRight {
-			left, right = contentBox, menuBox
+	for i := range contentBox {
+		parts := make([]string, len(boxes))
+		for j, b := range boxes {
+			parts[j] = b[i]
 		}
-		for i := range left {
-			rows = append(rows, left[i]+" "+right[i])
-		}
+		rows = append(rows, strings.Join(parts, " "))
 	}
 	return lipgloss.NewStyle().Width(w).MaxHeight(h + 2).Render(strings.Join(rows, "\n"))
 }
@@ -206,7 +224,7 @@ func (m Model) menu(h int) string {
 	// Çalan şarkının kapağı menünün altında; Şimdi çalıyor sayfasında zaten büyüğü var.
 	// Yer azsa kapak küçülür (en çok 18×9, en az 8×4); albüm adı sığarsa altında.
 	ch := menuCoverRows(h, len(rows))
-	if url := m.nowCoverURL(); url != "" && m.page != pageNow && !m.help && ch > 0 {
+	if url := m.nowCoverURL(); url != "" && m.page != pageNow && !m.help && ch > 0 && !m.layout().panel {
 		rows = append(rows, "")
 		for _, l := range strings.Split(m.coverBox(url, ch*2, ch), "\n") {
 			rows = append(rows, " "+l)

@@ -18,6 +18,8 @@ type layout struct {
 	menuX          int
 	contentX       int
 	contentW       int
+	panel          bool // yan panel (panel.go): içeriğin sağında
+	panelX         int
 }
 
 func (m Model) layout() layout {
@@ -55,6 +57,16 @@ func (m Model) layout() layout {
 				l.contentX = menuBox + 1 + 2
 			}
 		}
+		// Yan panel kendi kutusunda, içerik kutusunun sağında.
+		const panelBox = panelW + 4 + 1
+		if m.panelWanted() && l.contentW-panelBox >= panelMinContent {
+			l.panel = true
+			l.contentW -= panelBox
+			l.panelX = l.contentX + l.contentW + 2 + 1 + 2
+			if l.menuRight {
+				l.menuX = l.panelX + panelW + 2 + 1 + 2
+			}
+		}
 		return l
 	}
 	l.contentX, l.contentW = margin, max(m.width-margin-1, 1)
@@ -66,6 +78,14 @@ func (m Model) layout() layout {
 		} else {
 			l.menuX = margin
 			l.contentX = margin + menuWidth + gutter
+		}
+	}
+	if m.panelWanted() && l.contentW-panelW-gutter >= panelMinContent {
+		l.panel = true
+		l.contentW -= panelW + gutter
+		l.panelX = l.contentX + l.contentW + gutter
+		if l.menuRight {
+			l.menuX = l.panelX + panelW + gutter
 		}
 	}
 	return l

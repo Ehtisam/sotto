@@ -14,7 +14,7 @@ import (
 
 // subcommands: komutların alt komutları ya da sabit değerleri.
 var subcommands = map[string][]string{
-	"":           {"play", "pause", "toggle", "next", "prev", "seek", "vol", "mute", "shuffle", "repeat", "status", "like", "unlike", "connect", "search", "queue", "devices", "playlist", "theme", "history", "doctor", "setup", "completion", "help", "version"},
+	"":           {"play", "pause", "toggle", "next", "prev", "seek", "vol", "mute", "shuffle", "repeat", "status", "like", "unlike", "connect", "search", "queue", "devices", "playlist", "theme", "history", "doctor", "setup", "completion", "mcp", "help", "version"},
 	"mute":       {"on", "off"},
 	"shuffle":    {"on", "off"},
 	"repeat":     {"off", "context", "track"},

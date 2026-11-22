@@ -12,14 +12,11 @@ import (
 func TestDrivePlaybackSettings(t *testing.T) {
 	d, _ := driveOffline(t)
 	d.do("8<wait:600>")
-	s := d.screen()
-	for _, want := range []string{"Settings", "Speaker"} {
-		if !strings.Contains(s, want) {
-			t.Fatalf("settings lack %q:\n%s", want, s)
-		}
+	if s := d.screen(); !strings.Contains(s, "Settings") {
+		t.Fatalf("settings did not open:\n%s", s)
 	}
 	goTo := func(id settingID) {
-		for i := 0; i < 30 && d.model().settingSelected() != id; i++ {
+		for i := 0; i < 40 && d.model().settingSelected() != id; i++ {
 			d.do("<down><wait:60>")
 		}
 		if d.model().settingSelected() != id {
@@ -27,6 +24,11 @@ func TestDrivePlaybackSettings(t *testing.T) {
 		}
 	}
 	goTo(setResume)
+	// Hoparlör bölümü, imleç ona inince görünür (liste kaydırılır).
+	s := d.screen()
+	if !strings.Contains(s, "Speaker") {
+		t.Fatalf("settings lack the Speaker section:\n%s", s)
+	}
 	d.do("<right><wait:200>")
 	if s = d.screen(); !strings.Contains(s, "play it") {
 		t.Fatalf("on start not changed:\n%s", s)

@@ -188,7 +188,7 @@ func TestComplete(t *testing.T) {
 		want   string
 	}{
 		{nil, "pl", "play playlist"},
-		{nil, "", "completion connect devices doctor help history like mute next pause play playlist prev queue repeat search seek setup shuffle status theme toggle unlike version vol"},
+		{nil, "", "completion connect devices doctor help history like mcp mute next pause play playlist prev queue repeat search seek setup shuffle status theme toggle unlike version vol"},
 		{[]string{"playlist"}, "d", "delete duplicate"},
 		{[]string{"playlists"}, "l", "list"},
 		{[]string{"playlist", "new", "x"}, "--p", "--public"},
